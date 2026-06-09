@@ -67,6 +67,10 @@ public class AC_PlayerController : MonoBehaviour
         normalHeight = controller.height;
         normalCenter = controller.center;
 
+        // Si hay un NavMeshAgent pegado, lo desactivamos — pelea con el CharacterController
+        var navAgent = GetComponent<UnityEngine.AI.NavMeshAgent>();
+        if (navAgent != null) navAgent.enabled = false;
+
         // FIX #2: Auto-asignar teclas según playerId si no fueron sobreescritas en el Inspector
         if (playerId == 2)
         {
@@ -112,7 +116,6 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         MovePlayer(input);
-        ClampToArena();
         CheckFall();
     }
 
@@ -170,6 +173,10 @@ public class AC_PlayerController : MonoBehaviour
         verticalVelocity.y += gravity * Time.deltaTime;
 
         Vector3 motion = (horizontal + verticalVelocity) * Time.deltaTime;
+
+        // FIX: Clampear el movimiento ANTES de aplicarlo — sin tocar el transform directo
+        motion = ClampMotionToArena(motion);
+
         controller.Move(motion);
     }
 
@@ -227,27 +234,46 @@ public class AC_PlayerController : MonoBehaviour
         return controller.isGrounded;
     }
 
-    // FIX #1: Clampear posición del jugador al radio de la arena para que no camine por los bordes
-    private void ClampToArena()
+    // Clampea el vector de movimiento para que el jugador no pueda salir de la arena.
+    // Opera sobre el motion ANTES de controller.Move() — sin enable/disable del controller.
+    private Vector3 ClampMotionToArena(Vector3 motion)
     {
-        if (AC_GameManager.Instance == null || AC_GameManager.Instance.arenaCenter == null) return;
+        if (AC_GameManager.Instance == null || AC_GameManager.Instance.arenaCenter == null)
+            return motion;
 
         Vector3 center = AC_GameManager.Instance.arenaCenter.position;
-        Vector3 flatPos = new Vector3(transform.position.x, center.y, transform.position.z);
-        Vector3 dirFromCenter = flatPos - center;
-        dirFromCenter.y = 0f;
+        Vector3 currentPos = transform.position;
+        Vector3 nextPos = currentPos + motion;
+
+        Vector3 flatCenter = new Vector3(center.x, 0f, center.z);
+        Vector3 flatNext = new Vector3(nextPos.x, 0f, nextPos.z);
+        Vector3 dirFromCenter = flatNext - flatCenter;
+
+        // Si el personaje ya está fuera, forzarlo a volver antes de aplicar movimiento
+        Vector3 flatCurrent = new Vector3(currentPos.x, 0f, currentPos.z);
+        Vector3 dirCurrent = flatCurrent - flatCenter;
 
         float maxRadius = AC_GameManager.Instance.CurrentArenaRadius;
+        if (dirCurrent.magnitude > maxRadius + 0.05f)
+        {
+            // Ya está fuera — forzar reposicionamiento solo en este caso extremo
+            dirCurrent = dirCurrent.normalized;
+            Vector3 safePos = flatCenter + dirCurrent * (maxRadius - 0.1f);
+            safePos.y = currentPos.y;
+            motion = safePos - currentPos;
+            return motion;
+        }
+
+        // Caso normal: limitar el movimiento para no pasarse del radio
         if (dirFromCenter.magnitude > maxRadius)
         {
             dirFromCenter.Normalize();
-            Vector3 clampedPos = center + dirFromCenter * maxRadius;
-            clampedPos.y = transform.position.y;
-
-            controller.enabled = false;
-            transform.position = clampedPos;
-            controller.enabled = true;
+            Vector3 clampedNext = flatCenter + dirFromCenter * maxRadius;
+            clampedNext.y = nextPos.y;
+            motion = clampedNext - currentPos;
         }
+
+        return motion;
     }
 
     private void CheckFall()
