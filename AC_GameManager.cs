@@ -217,6 +217,13 @@ public class AC_GameManager : MonoBehaviour
             AddScore(b, 2);
             SetStatus("Abrazo mutuo: +2 para ambos");
         }
+        // FIX #4: ToqueMaldito con abrazo mutuo — ambos fueron abrazados, ambos suman +1
+        else if (currentLaw == AC_HugLaw.ToqueMaldito)
+        {
+            AddScore(a, 1);
+            AddScore(b, 1);
+            SetStatus("Toque maldito mutuo: +1 para ambos (los dos fueron abrazados)");
+        }
         else
         {
             SetStatus("Empate de abrazo: ambos rebotan");
