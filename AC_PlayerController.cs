@@ -15,12 +15,19 @@ public class AC_PlayerController : MonoBehaviour
     public KeyCode hugKey = KeyCode.Space;
     public KeyCode dashKey = KeyCode.LeftShift;
     public KeyCode holdKey = KeyCode.LeftControl;
+    public KeyCode jumpKey = KeyCode.None;
 
     [Header("Movimiento")]
     public float moveSpeed = 5.5f;
     public float rotationSpeed = 12f;
     public float gravity = -25f;
     public float fallY = -4f;
+
+    [Header("Salto")]
+    public float jumpForce = 8f;
+    public float groundCheckDistance = 0.15f;
+    public float groundCheckRadius = 0.25f;
+    public LayerMask groundMask = ~0;
 
     [Header("Dash")]
     public float dashDistance = 3f;
@@ -59,6 +66,19 @@ public class AC_PlayerController : MonoBehaviour
         normalRadius = controller.radius;
         normalHeight = controller.height;
         normalCenter = controller.center;
+
+        // FIX #2: Auto-asignar teclas según playerId si no fueron sobreescritas en el Inspector
+        if (playerId == 2)
+        {
+            if (upKey == KeyCode.W) upKey = KeyCode.UpArrow;
+            if (downKey == KeyCode.S) downKey = KeyCode.DownArrow;
+            if (leftKey == KeyCode.A) leftKey = KeyCode.LeftArrow;
+            if (rightKey == KeyCode.D) rightKey = KeyCode.RightArrow;
+            if (hugKey == KeyCode.Space) hugKey = KeyCode.Return;
+            if (dashKey == KeyCode.LeftShift) dashKey = KeyCode.RightShift;
+            if (holdKey == KeyCode.LeftControl) holdKey = KeyCode.RightControl;
+            displayName = "Jugador 2";
+        }
     }
 
     private void Update()
@@ -85,7 +105,14 @@ public class AC_PlayerController : MonoBehaviour
             StartDash(input);
         }
 
+        // FIX #1: Lógica de salto con ground check robusto
+        if (Input.GetKeyDown(jumpKey) && IsGrounded() && !IsHolding)
+        {
+            verticalVelocity.y = jumpForce;
+        }
+
         MovePlayer(input);
+        ClampToArena();
         CheckFall();
     }
 
@@ -135,7 +162,8 @@ public class AC_PlayerController : MonoBehaviour
             horizontal += AC_GameManager.Instance.CurrentWindVelocity;
         }
 
-        if (controller.isGrounded && verticalVelocity.y < 0f)
+        // FIX #1: Ground check robusto con SphereCast en vez de solo controller.isGrounded
+        if (IsGrounded() && verticalVelocity.y < 0f)
         {
             verticalVelocity.y = -2f;
         }
@@ -181,6 +209,45 @@ public class AC_PlayerController : MonoBehaviour
         controller.radius = normalRadius;
         controller.height = normalHeight;
         controller.center = normalCenter;
+    }
+
+    // FIX #1: Ground check por SphereCast — más confiable que controller.isGrounded solo
+    private bool IsGrounded()
+    {
+        Vector3 origin = transform.position + controller.center;
+        float radius = controller.radius * groundCheckRadius;
+        float distance = (controller.height * 0.5f) - controller.radius + groundCheckDistance;
+
+        if (Physics.SphereCast(origin, radius, Vector3.down, out RaycastHit hit, distance, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            return true;
+        }
+
+        // Fallback al isGrounded nativo para pendientes o casos extremos
+        return controller.isGrounded;
+    }
+
+    // FIX #1: Clampear posición del jugador al radio de la arena para que no camine por los bordes
+    private void ClampToArena()
+    {
+        if (AC_GameManager.Instance == null || AC_GameManager.Instance.arenaCenter == null) return;
+
+        Vector3 center = AC_GameManager.Instance.arenaCenter.position;
+        Vector3 flatPos = new Vector3(transform.position.x, center.y, transform.position.z);
+        Vector3 dirFromCenter = flatPos - center;
+        dirFromCenter.y = 0f;
+
+        float maxRadius = AC_GameManager.Instance.CurrentArenaRadius;
+        if (dirFromCenter.magnitude > maxRadius)
+        {
+            dirFromCenter.Normalize();
+            Vector3 clampedPos = center + dirFromCenter * maxRadius;
+            clampedPos.y = transform.position.y;
+
+            controller.enabled = false;
+            transform.position = clampedPos;
+            controller.enabled = true;
+        }
     }
 
     private void CheckFall()
