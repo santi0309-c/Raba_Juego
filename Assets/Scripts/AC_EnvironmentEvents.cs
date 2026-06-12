@@ -135,11 +135,13 @@ public class AC_EnvironmentEvents : MonoBehaviour
 
         Vector3 dir = Random.value < 0.5f ? Vector3.right : Vector3.left;
         AC_GameManager.Instance.CurrentWindVelocity = dir * windStrength;
+        AC_GameManager.Instance.SetEventLabel("Evento: Viento lateral");
         Debug.Log("EVENTO: Viento lateral");
 
         yield return new WaitForSeconds(duration);
 
         AC_GameManager.Instance.CurrentWindVelocity = Vector3.zero;
+        AC_GameManager.Instance.SetEventLabel(string.Empty);
         Debug.Log("FIN EVENTO: Viento lateral");
     }
 
@@ -148,6 +150,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
         if (AC_GameManager.Instance == null) yield break;
 
         Debug.Log("EVENTO: La arena se achica");
+        AC_GameManager.Instance.SetEventLabel("Evento: Arena chica");
         float originalRadius = AC_GameManager.Instance.baseArenaRadius;
         AC_GameManager.Instance.SetArenaRadius(originalRadius * shrinkFactor);
 
@@ -163,6 +166,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
         yield return new WaitForSeconds(duration);
 
         AC_GameManager.Instance.ResetArenaRadius();
+        AC_GameManager.Instance.SetEventLabel(string.Empty);
         if (arenaVisual != null) arenaVisual.localScale = originalArenaScale;
         Debug.Log("FIN EVENTO: La arena se achica");
     }
@@ -173,6 +177,10 @@ public class AC_EnvironmentEvents : MonoBehaviour
         if (arenaVisual == null) yield break;
 
         Debug.Log("EVENTO: El piso se inclina");
+        if (AC_GameManager.Instance != null)
+        {
+            AC_GameManager.Instance.SetEventLabel("Evento: Piso inclinado");
+        }
 
         // Elegir una direcciÃ³n aleatoria para la inclinaciÃ³n
         Vector3 tiltAxis = Random.value < 0.5f ? Vector3.forward : Vector3.right;
@@ -203,6 +211,10 @@ public class AC_EnvironmentEvents : MonoBehaviour
         }
 
         if (arenaVisual != null) arenaVisual.localRotation = originalArenaRotation;
+        if (AC_GameManager.Instance != null)
+        {
+            AC_GameManager.Instance.SetEventLabel(string.Empty);
+        }
         Debug.Log("FIN EVENTO: El piso se inclina");
     }
 
@@ -210,6 +222,10 @@ public class AC_EnvironmentEvents : MonoBehaviour
     private IEnumerator FogEvent(float duration)
     {
         Debug.Log("EVENTO: Niebla baja");
+        if (AC_GameManager.Instance != null)
+        {
+            AC_GameManager.Instance.SetEventLabel("Evento: Niebla baja");
+        }
 
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Exponential;
@@ -223,6 +239,10 @@ public class AC_EnvironmentEvents : MonoBehaviour
         RenderSettings.fogDensity = originalFogDensity;
         RenderSettings.fogColor = originalFogColor;
         RenderSettings.fogMode = originalFogMode;
+        if (AC_GameManager.Instance != null)
+        {
+            AC_GameManager.Instance.SetEventLabel(string.Empty);
+        }
 
         Debug.Log("FIN EVENTO: Niebla baja");
     }

@@ -18,7 +18,7 @@ public class AC_PlayerController : MonoBehaviour
     public KeyCode alternateDashKey = KeyCode.None;
     public KeyCode holdKey = KeyCode.LeftControl;
     public KeyCode alternateHoldKey = KeyCode.None;
-    public KeyCode jumpKey = KeyCode.None;
+    public KeyCode jumpKey = KeyCode.Q;
 
     [Header("Movimiento")]
     public float moveSpeed = 5.5f;
@@ -43,9 +43,11 @@ public class AC_PlayerController : MonoBehaviour
     public float dashDuration = 0.14f;
     public float dashCooldown = 4f;
 
-    [Header("Aguantar")]
+    [Header("Bloqueo")]
     public float holdRadius = 0.18f;
     public float holdHeightMultiplier = 0.75f;
+    public Renderer[] bodyRenderers;
+    public Color blockingColor = new Color(1f, 0.84f, 0.35f, 1f);
 
     private CharacterController controller;
     private AC_HugDetector hugDetector;
@@ -67,8 +69,9 @@ public class AC_PlayerController : MonoBehaviour
     private float turnInput;
     private float lastRespawnTime = -999f;
     private readonly float respawnProtectionDuration = 0.5f;
+    private Color[] originalColors;
 
-    public bool IsHolding { get; private set; }
+    public bool IsBlocking { get; private set; }
     public bool IsDashing => dashTimer > 0f;
     public float LastDashTime { get; private set; } = -999f;
     public float LastHugPressTime { get; private set; } = -999f;
@@ -106,6 +109,7 @@ public class AC_PlayerController : MonoBehaviour
 
         ConfigureDefaultBindings();
         NormalizePhysicsComponents();
+        CacheBodyRenderers();
     }
 
     private void ConfigureDefaultBindings()
@@ -120,11 +124,15 @@ public class AC_PlayerController : MonoBehaviour
             if (alternateHugKey == KeyCode.None) alternateHugKey = KeyCode.KeypadEnter;
             if (dashKey == KeyCode.LeftShift) dashKey = KeyCode.RightShift;
             if (holdKey == KeyCode.LeftControl) holdKey = KeyCode.RightControl;
+            if (jumpKey == KeyCode.Q || jumpKey == KeyCode.None) jumpKey = KeyCode.Keypad0;
             displayName = "Jugador 2";
         }
         else
         {
-            if (alternateHugKey == KeyCode.None) alternateHugKey = KeyCode.None;
+            if (jumpKey == KeyCode.None)
+            {
+                jumpKey = KeyCode.Q;
+            }
         }
     }
 
@@ -140,6 +148,23 @@ public class AC_PlayerController : MonoBehaviour
         if (fallbackCollider != null)
         {
             fallbackCollider.enabled = false;
+        }
+    }
+
+    private void CacheBodyRenderers()
+    {
+        if (bodyRenderers == null || bodyRenderers.Length == 0)
+        {
+            bodyRenderers = GetComponentsInChildren<Renderer>();
+        }
+
+        originalColors = new Color[bodyRenderers.Length];
+        for (int i = 0; i < bodyRenderers.Length; i++)
+        {
+            if (bodyRenderers[i] != null && bodyRenderers[i].material != null)
+            {
+                originalColors[i] = bodyRenderers[i].material.color;
+            }
         }
     }
 
@@ -178,23 +203,22 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         Vector3 input = ReadInputDirection();
-        bool hasControlInput = Mathf.Abs(forwardInput) > 0.01f || Mathf.Abs(turnInput) > 0.01f;
-        bool wantsHold = IsActionHeld(holdKey, alternateHoldKey) && !hasControlInput && !IsDashing;
-        SetHolding(wantsHold);
+        bool wantsBlock = IsActionHeld(holdKey, alternateHoldKey) && !IsDashing && !HasMovementInput();
+        SetBlocking(wantsBlock);
 
-        if (IsActionPressed(hugKey, alternateHugKey) && hugDetector != null && !IsHolding)
+        if (CanTryHug() && IsActionPressed(hugKey, alternateHugKey))
         {
             LastHugPressTime = Time.time;
             hugDetector.StartHug();
         }
 
         dashCooldownTimer -= Time.deltaTime;
-        if (IsActionPressed(dashKey, alternateDashKey) && dashCooldownTimer <= 0f && !IsHolding)
+        if (CanTryDash() && IsActionPressed(dashKey, alternateDashKey) && dashCooldownTimer <= 0f)
         {
             StartDash(input);
         }
 
-        if (jumpKey != KeyCode.None && Input.GetKeyDown(jumpKey) && IsGrounded() && !IsHolding)
+        if (CanTryJump() && Input.GetKeyDown(jumpKey) && IsGrounded())
         {
             verticalVelocity.y = jumpForce;
         }
@@ -220,13 +244,13 @@ public class AC_PlayerController : MonoBehaviour
             return Mathf.Abs(forwardInput) > 0.01f ? transform.forward * forwardInput : Vector3.zero;
         }
 
-        Vector3 dir = new Vector3(x, 0f, z);
-        if (dir.sqrMagnitude > 1f)
+        Vector3 direction = new Vector3(x, 0f, z);
+        if (direction.sqrMagnitude > 1f)
         {
-            dir.Normalize();
+            direction.Normalize();
         }
 
-        if (moveRelativeToCamera && dir.sqrMagnitude > 0.01f)
+        if (moveRelativeToCamera && direction.sqrMagnitude > 0.01f)
         {
             Transform cameraTransform = ResolveMovementCamera();
             if (cameraTransform != null)
@@ -239,20 +263,20 @@ public class AC_PlayerController : MonoBehaviour
                 cameraRight.y = 0f;
                 cameraRight.Normalize();
 
-                dir = cameraRight * dir.x + cameraForward * dir.z;
-                if (dir.sqrMagnitude > 1f)
+                direction = cameraRight * direction.x + cameraForward * direction.z;
+                if (direction.sqrMagnitude > 1f)
                 {
-                    dir.Normalize();
+                    direction.Normalize();
                 }
             }
         }
 
-        if (dir.sqrMagnitude > 0.01f)
+        if (direction.sqrMagnitude > 0.01f)
         {
-            lastNonZeroInput = dir.normalized;
+            lastNonZeroInput = direction.normalized;
         }
 
-        return dir;
+        return direction;
     }
 
     private Transform ResolveMovementCamera()
@@ -273,7 +297,7 @@ public class AC_PlayerController : MonoBehaviour
 
         if (tankControls)
         {
-            if (Mathf.Abs(turnInput) > 0.01f && !IsHolding)
+            if (Mathf.Abs(turnInput) > 0.01f && !IsBlocking)
             {
                 transform.Rotate(Vector3.up, turnInput * turnSpeedDegrees * Time.deltaTime, Space.World);
             }
@@ -285,16 +309,16 @@ public class AC_PlayerController : MonoBehaviour
             }
         }
 
-        if (!IsHolding)
+        if (!IsBlocking)
         {
             horizontal = movementInput * moveSpeed;
         }
 
-        if (!tankControls && movementInput.sqrMagnitude > 0.01f && !IsHolding)
+        if (!tankControls && movementInput.sqrMagnitude > 0.01f && !IsBlocking)
         {
-            Quaternion targetRot = Quaternion.LookRotation(movementInput, Vector3.up);
+            Quaternion targetRotation = Quaternion.LookRotation(movementInput, Vector3.up);
             float maxDegreesDelta = Mathf.Max(90f, rotationSpeed * 90f) * Time.deltaTime;
-            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRot, maxDegreesDelta);
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, maxDegreesDelta);
         }
 
         if (dashTimer > 0f)
@@ -317,9 +341,6 @@ public class AC_PlayerController : MonoBehaviour
             }
         }
 
-        float maxHorizontalSpeed = moveSpeed + dashVelocity.magnitude + impulseVelocity.magnitude;
-        horizontal = Vector3.ClampMagnitude(horizontal, Mathf.Max(maxHorizontalSpeed, moveSpeed));
-
         if (AC_GameManager.Instance != null)
         {
             horizontal += AC_GameManager.Instance.CurrentWindVelocity;
@@ -331,22 +352,20 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         verticalVelocity.y += gravity * Time.deltaTime;
-
         Vector3 motion = (horizontal + verticalVelocity) * Time.deltaTime;
-        motion = ClampMotionToArena(motion);
         controller.Move(motion);
     }
 
     private void StartDash(Vector3 input)
     {
-        Vector3 dashDir = input.sqrMagnitude > 0.01f ? input.normalized : lastNonZeroInput;
-        if (dashDir.sqrMagnitude < 0.01f)
+        Vector3 dashDirection = input.sqrMagnitude > 0.01f ? input.normalized : lastNonZeroInput;
+        if (dashDirection.sqrMagnitude < 0.01f)
         {
-            dashDir = transform.forward;
+            dashDirection = transform.forward;
         }
 
         float dashSpeed = dashDistance / Mathf.Max(0.01f, dashDuration);
-        dashVelocity = dashDir * dashSpeed;
+        dashVelocity = dashDirection * dashSpeed;
         dashTimer = dashDuration;
         dashCooldownTimer = dashCooldown;
         LastDashTime = Time.time;
@@ -358,14 +377,15 @@ public class AC_PlayerController : MonoBehaviour
         impulseTimer = duration;
     }
 
-    private void SetHolding(bool value)
+    private void SetBlocking(bool value)
     {
-        IsHolding = value;
+        IsBlocking = value;
         if (value)
         {
             controller.radius = holdRadius;
             controller.height = normalHeight * holdHeightMultiplier;
             controller.center = new Vector3(normalCenter.x, controller.height * 0.5f, normalCenter.z);
+            SetRendererColors(blockingColor);
         }
         else
         {
@@ -375,10 +395,11 @@ public class AC_PlayerController : MonoBehaviour
 
     private void RestoreNormalCollider()
     {
-        IsHolding = false;
+        IsBlocking = false;
         controller.radius = normalRadius;
         controller.height = normalHeight;
         controller.center = normalCenter;
+        RestoreRendererColors();
     }
 
     private bool IsGrounded()
@@ -395,42 +416,6 @@ public class AC_PlayerController : MonoBehaviour
         return controller.isGrounded;
     }
 
-    private Vector3 ClampMotionToArena(Vector3 motion)
-    {
-        if (AC_GameManager.Instance == null || AC_GameManager.Instance.arenaCenter == null)
-        {
-            return motion;
-        }
-
-        Vector3 center = AC_GameManager.Instance.arenaCenter.position;
-        Vector3 currentPos = transform.position;
-        Vector3 nextPos = currentPos + motion;
-        Vector3 flatCenter = new Vector3(center.x, 0f, center.z);
-        Vector3 flatCurrent = new Vector3(currentPos.x, 0f, currentPos.z);
-        Vector3 flatNext = new Vector3(nextPos.x, 0f, nextPos.z);
-        Vector3 dirCurrent = flatCurrent - flatCenter;
-        Vector3 dirFromCenter = flatNext - flatCenter;
-
-        float maxRadius = Mathf.Max(0.5f, AC_GameManager.Instance.CurrentArenaRadius);
-        if (dirCurrent.magnitude > maxRadius + 0.05f)
-        {
-            dirCurrent = dirCurrent.normalized;
-            Vector3 safePos = flatCenter + dirCurrent * (maxRadius - 0.1f);
-            safePos.y = currentPos.y;
-            return safePos - currentPos;
-        }
-
-        if (dirFromCenter.magnitude > maxRadius)
-        {
-            dirFromCenter.Normalize();
-            Vector3 clampedNext = flatCenter + dirFromCenter * maxRadius;
-            clampedNext.y = nextPos.y;
-            motion = clampedNext - currentPos;
-        }
-
-        return motion;
-    }
-
     private void CheckFall()
     {
         if (AC_GameManager.Instance == null)
@@ -444,23 +429,38 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         Transform center = AC_GameManager.Instance.arenaCenter;
-        Vector3 c = center != null ? center.position : Vector3.zero;
+        Vector3 centerPosition = center != null ? center.position : Vector3.zero;
         Vector3 flatPlayer = new Vector3(transform.position.x, 0f, transform.position.z);
-        Vector3 flatCenter = new Vector3(c.x, 0f, c.z);
-        float dist = Vector3.Distance(flatPlayer, flatCenter);
+        Vector3 flatCenter = new Vector3(centerPosition.x, 0f, centerPosition.z);
+        float distance = Vector3.Distance(flatPlayer, flatCenter);
 
-        if (transform.position.y < fallY || dist > AC_GameManager.Instance.CurrentArenaRadius + 0.35f)
+        bool fellByHeight = transform.position.y < fallY;
+        bool fellByDistance = distance > AC_GameManager.Instance.CurrentArenaRadius + 0.75f;
+        if (fellByHeight || fellByDistance)
         {
             AC_GameManager.Instance.PlayerFell(this);
         }
     }
 
-    public void ClearMovementState()
+    public void CancelTransientActions()
     {
         dashTimer = 0f;
         impulseTimer = 0f;
+        dashVelocity = Vector3.zero;
+        impulseVelocity = Vector3.zero;
+        hugDetector?.CancelHug();
+    }
+
+    public void CancelAllActions()
+    {
+        CancelTransientActions();
         verticalVelocity = Vector3.zero;
         RestoreNormalCollider();
+    }
+
+    public void ClearMovementState()
+    {
+        CancelAllActions();
     }
 
     public void Respawn(Vector3 position, Quaternion rotation)
@@ -494,19 +494,39 @@ public class AC_PlayerController : MonoBehaviour
         {
             Vector3 center = centerTransform.position;
             Vector3 flatCenter = new Vector3(center.x, 0f, center.z);
-            Vector3 flatPos = new Vector3(position.x, 0f, position.z);
-            float maxRadius = Mathf.Max(0.5f, AC_GameManager.Instance.CurrentArenaRadius - 0.5f);
+            Vector3 flatPosition = new Vector3(position.x, 0f, position.z);
+            float maxRadius = Mathf.Max(0.5f, AC_GameManager.Instance.CurrentArenaRadius - 0.75f);
 
-            if (Vector3.Distance(flatPos, flatCenter) > maxRadius)
+            if (Vector3.Distance(flatPosition, flatCenter) > maxRadius)
             {
-                Vector3 dir = (flatPos - flatCenter).normalized;
-                flatPos = flatCenter + dir * maxRadius;
-                position.x = flatPos.x;
-                position.z = flatPos.z;
+                Vector3 direction = (flatPosition - flatCenter).normalized;
+                flatPosition = flatCenter + direction * maxRadius;
+                position.x = flatPosition.x;
+                position.z = flatPosition.z;
             }
         }
 
         position.y = Mathf.Max(position.y, fallY + 1f);
+    }
+
+    private bool HasMovementInput()
+    {
+        return Mathf.Abs(forwardInput) > 0.01f || Mathf.Abs(turnInput) > 0.01f;
+    }
+
+    private bool CanTryHug()
+    {
+        return hugDetector != null && !IsBlocking;
+    }
+
+    private bool CanTryDash()
+    {
+        return !IsBlocking;
+    }
+
+    private bool CanTryJump()
+    {
+        return jumpKey != KeyCode.None && !IsBlocking;
     }
 
     private bool IsActionPressed(KeyCode primary, KeyCode secondary)
@@ -519,5 +539,32 @@ public class AC_PlayerController : MonoBehaviour
     {
         return (primary != KeyCode.None && Input.GetKey(primary)) ||
                (secondary != KeyCode.None && Input.GetKey(secondary));
+    }
+
+    private void SetRendererColors(Color targetColor)
+    {
+        for (int i = 0; i < bodyRenderers.Length; i++)
+        {
+            if (bodyRenderers[i] != null && bodyRenderers[i].material != null)
+            {
+                bodyRenderers[i].material.color = targetColor;
+            }
+        }
+    }
+
+    private void RestoreRendererColors()
+    {
+        if (originalColors == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < bodyRenderers.Length && i < originalColors.Length; i++)
+        {
+            if (bodyRenderers[i] != null && bodyRenderers[i].material != null)
+            {
+                bodyRenderers[i].material.color = originalColors[i];
+            }
+        }
     }
 }

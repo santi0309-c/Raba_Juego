@@ -26,6 +26,7 @@ public class AC_DashCooldownUI : MonoBehaviour
 
     private void Update()
     {
+        AutoWireIfNeeded();
         UpdateDashText(player1, dashTextP1);
         UpdateDashText(player2, dashTextP2);
     }
@@ -36,15 +37,48 @@ public class AC_DashCooldownUI : MonoBehaviour
 
         float remaining = player.DashCooldownRemaining;
 
+        string blockText = player.IsBlocking ? " | BLOQUEANDO" : " | LIBRE";
+
         if (remaining <= 0f)
         {
-            label.text = "DASH: LISTO";
+            label.text = "DASH: LISTO" + blockText;
             label.color = readyColor;
         }
         else
         {
-            label.text = "DASH: " + remaining.ToString("F1") + "s";
+            label.text = "DASH: " + remaining.ToString("F1") + "s" + blockText;
             label.color = cooldownColor;
+        }
+    }
+
+    private void AutoWireIfNeeded()
+    {
+        if (player1 == null && AC_GameManager.Instance != null)
+        {
+            player1 = AC_GameManager.Instance.player1;
+        }
+
+        if (player2 == null && AC_GameManager.Instance != null)
+        {
+            player2 = AC_GameManager.Instance.player2;
+        }
+
+        if (dashTextP1 == null)
+        {
+            GameObject textObject = GameObject.Find("DashTextP1");
+            if (textObject != null)
+            {
+                dashTextP1 = textObject.GetComponent<Text>();
+            }
+        }
+
+        if (dashTextP2 == null)
+        {
+            GameObject textObject = GameObject.Find("DashTextP2");
+            if (textObject != null)
+            {
+                dashTextP2 = textObject.GetComponent<Text>();
+            }
         }
     }
 }

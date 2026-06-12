@@ -17,7 +17,37 @@ public class AC_UILayoutManager : MonoBehaviour
     [Header("Margen desde bordes (en píxeles)")]
     public float margin = 24f;
 
+    public void AutoWire(Text currentStatusText, Text currentScoreText)
+    {
+        if (scoreText == null)
+        {
+            scoreText = currentScoreText != null ? currentScoreText : FindText("ScoreText");
+        }
+
+        if (statusText == null)
+        {
+            statusText = currentStatusText != null ? currentStatusText : FindText("StatusText");
+        }
+
+        if (dashTextP1 == null)
+        {
+            dashTextP1 = FindText("DashTextP1");
+        }
+
+        if (dashTextP2 == null)
+        {
+            dashTextP2 = FindText("DashTextP2");
+        }
+
+        ApplyLayout();
+    }
+
     private void Awake()
+    {
+        AutoWire(null, null);
+    }
+
+    private void ApplyLayout()
     {
         SetupTextElement(scoreText, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -margin), TextAnchor.UpperCenter);
         SetupTextElement(statusText, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -margin * 2f - 10f), TextAnchor.UpperCenter);
@@ -71,5 +101,11 @@ public class AC_UILayoutManager : MonoBehaviour
         shadow.effectDistance = new Vector2(1f, -1f);
 
         rt.localScale = Vector3.one;
+    }
+
+    private Text FindText(string objectName)
+    {
+        GameObject target = GameObject.Find(objectName);
+        return target != null ? target.GetComponent<Text>() : null;
     }
 }

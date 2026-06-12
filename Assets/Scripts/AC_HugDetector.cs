@@ -101,12 +101,32 @@ public class AC_HugDetector : MonoBehaviour
 
     public void StartHug()
     {
+        if (owner != null && owner.IsBlocking)
+        {
+            return;
+        }
+
         if (hugRoutine != null)
         {
             StopCoroutine(hugRoutine);
         }
 
         hugRoutine = StartCoroutine(HugRoutine());
+    }
+
+    public void CancelHug()
+    {
+        if (hugRoutine != null)
+        {
+            StopCoroutine(hugRoutine);
+            hugRoutine = null;
+        }
+
+        IsActive = false;
+        if (volumeVisual != null)
+        {
+            volumeVisual.SetActive(false);
+        }
     }
 
     private IEnumerator HugRoutine()

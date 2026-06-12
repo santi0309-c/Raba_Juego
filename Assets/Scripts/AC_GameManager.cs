@@ -13,6 +13,15 @@ public enum AC_HugLaw
     SoloUnoVale
 }
 
+public enum AC_MatchState
+{
+    Pregame,
+    Countdown,
+    Playing,
+    RoundEnd,
+    MatchEnd
+}
+
 public class AC_GameManager : MonoBehaviour
 {
     public static AC_GameManager Instance { get; private set; }
@@ -37,34 +46,42 @@ public class AC_GameManager : MonoBehaviour
 
     [Header("Rondas especiales")]
     public int roundsToPlay = 5;
-    public float lawReadSeconds = 5f;
+    public float lawReadSeconds = 3f;
     public float countdownSeconds = 3f;
 
     [Header("Abrazo cargado")]
     public float chargedMaxSeconds = 3f;
     public float chargedBreakDistance = 1.6f;
 
-    [Header("Feedback opcional")]
+    [Header("HUD")]
     public Text statusText;
     public Text scoreText;
-    [Tooltip("Control de puntaje/vida/temporizador inspirado en control.cs del profe")]
     public AC_Control controlState;
 
     [Header("Eventos de entorno")]
     public AC_EnvironmentEvents environmentEvents;
 
+    private AC_MainMenuUI mainMenuUI;
+    private AC_SceneDecorator sceneDecorator;
+    private Coroutine matchLoopRoutine;
+    private Coroutine pendingResolveRoutine;
+
     private int scoreP1;
     private int scoreP2;
     private int currentRoundIndex;
     private AC_HugLaw currentLaw = AC_HugLaw.Normal;
+    private AC_MatchState currentState = AC_MatchState.Pregame;
     private bool firstHugAlreadyScored;
     private bool resolvingPair;
+    private string currentEventLabel = string.Empty;
+    private string currentMessage = string.Empty;
     private string lastStatus;
 
     private readonly List<AC_HugLaw> lawOrder = new List<AC_HugLaw>();
 
-    public bool IsRoundActive { get; private set; }
+    public bool IsRoundActive => currentState == AC_MatchState.Playing;
     public AC_HugLaw CurrentLaw => currentLaw;
+    public AC_MatchState CurrentMatchState => currentState;
     public float CurrentArenaRadius => Mathf.Max(0.5f, currentArenaRadius);
     public Vector3 CurrentWindVelocity
     {
@@ -77,6 +94,9 @@ public class AC_GameManager : MonoBehaviour
         baseArenaRadius = Mathf.Max(0.5f, baseArenaRadius);
         currentArenaRadius = Mathf.Max(baseArenaRadius, 0.5f);
         roundSeconds = Mathf.Max(10f, roundSeconds);
+        roundsToPlay = Mathf.Max(1, roundsToPlay);
+        countdownSeconds = Mathf.Max(1f, countdownSeconds);
+        lawReadSeconds = Mathf.Max(0f, lawReadSeconds);
     }
 
     private void Awake()
@@ -88,20 +108,7 @@ public class AC_GameManager : MonoBehaviour
         }
 
         Instance = this;
-
-        if (controlState == null)
-        {
-            controlState = GetComponent<AC_Control>();
-        }
-
-        if (controlState == null)
-        {
-            controlState = gameObject.AddComponent<AC_Control>();
-        }
-
-        controlState.ResetScoresAndLives(1);
-        ResetArenaRadius();
-        CurrentWindVelocity = Vector3.zero;
+        EnsureCoreReferences();
     }
 
     private void Start()
@@ -109,96 +116,104 @@ public class AC_GameManager : MonoBehaviour
         ValidateArenaReferences();
         ConfigurePlayerRespawns();
         SynchronizePlayerControllers();
-        BuildLawOrder();
-        UpdateScoreUI();
-
-        if (enableEnvironmentEvents && environmentEvents != null)
-        {
-            if (environmentEvents.arenaVisual == null && arenaCenter != null)
-            {
-                environmentEvents.arenaVisual = arenaCenter;
-            }
-
-            environmentEvents.EnsureArenaVisualAligned();
-            RecenterArenaCylinderIfNeeded();
-            environmentEvents.BeginMatch();
-        }
-
-        StartCoroutine(enableSpecialLaws ? MatchLoop() : SimpleMatchLoop());
-    }
-
-    private IEnumerator SimpleMatchLoop()
-    {
+        EnsurePresentationHelpers();
         ResetMatchState();
         ResetBothPlayers();
-        currentLaw = AC_HugLaw.Normal;
-        IsRoundActive = true;
-        controlState.StartRound(roundSeconds);
-        SetStatus("WASD/Space/Shift/Ctrl | Flechas/Enter/Shift der/Ctrl der", true);
-
-        while (controlState.IsActive && controlState.TiempoRestante > 0f)
-        {
-            SetStatus("Tiempo: " + Mathf.CeilToInt(controlState.TiempoRestante) + "s", false);
-            yield return null;
-        }
-
-        EndCurrentRound();
-        SetStatus(BuildFinalStatus(), true);
+        UpdateHudForIdle();
+        ShowMainMenu(true, "Listo para jugar");
     }
 
-    private IEnumerator MatchLoop()
+    public void BeginMatchFromMenu()
     {
-        UpdateScoreUI();
-
-        for (currentRoundIndex = 0; currentRoundIndex < roundsToPlay; currentRoundIndex++)
+        if (matchLoopRoutine != null)
         {
-            currentLaw = lawOrder[currentRoundIndex % lawOrder.Count];
-            yield return StartCoroutine(PlayRound(currentRoundIndex + 1, currentLaw));
+            StopCoroutine(matchLoopRoutine);
         }
 
-        if (scoreP1 == scoreP2)
-        {
-            currentLaw = AC_HugLaw.Normal;
-            yield return StartCoroutine(PlayRound(roundsToPlay + 1, currentLaw));
-        }
+        ResetMatchState();
+        ResetBothPlayers();
+        BuildLawOrder();
+        ShowMainMenu(false, string.Empty);
+        matchLoopRoutine = StartCoroutine(RunMatchLoop());
+    }
 
+    public void ReturnToMenu()
+    {
+        StopActiveCoroutines();
         EndCurrentRound();
-        SetStatus(BuildFinalStatus(), true);
+        ResetMatchState();
+        ResetBothPlayers();
+        UpdateHudForIdle();
+        ShowMainMenu(true, "Pulsa Jugar para una nueva ronda");
+    }
+
+    private IEnumerator RunMatchLoop()
+    {
+        PrepareMatchPresentation();
+
+        if (!enableSpecialLaws)
+        {
+            yield return StartCoroutine(PlayRound(1, AC_HugLaw.Normal));
+        }
+        else
+        {
+            for (currentRoundIndex = 0; currentRoundIndex < roundsToPlay; currentRoundIndex++)
+            {
+                currentLaw = lawOrder[currentRoundIndex % lawOrder.Count];
+                yield return StartCoroutine(PlayRound(currentRoundIndex + 1, currentLaw));
+            }
+
+            if (scoreP1 == scoreP2)
+            {
+                yield return StartCoroutine(PlayRound(roundsToPlay + 1, AC_HugLaw.Normal));
+            }
+        }
+
+        currentState = AC_MatchState.MatchEnd;
+        SetRoundMessage(BuildFinalStatus());
+        UpdateScoreUI();
+        ShowMainMenu(true, BuildFinalStatus());
+        matchLoopRoutine = null;
     }
 
     private IEnumerator PlayRound(int roundNumber, AC_HugLaw law)
     {
+        currentState = AC_MatchState.Countdown;
+        currentLaw = law;
         ResetRoundState();
         ResetBothPlayers();
-        CurrentWindVelocity = Vector3.zero;
 
-        SetStatus("RONDA " + roundNumber + " | LEY: " + GetLawText(law), true);
-        yield return new WaitForSeconds(lawReadSeconds);
+        if (lawReadSeconds > 0f)
+        {
+            SetRoundMessage("Ronda " + roundNumber + " | Ley: " + GetLawText(law));
+            yield return new WaitForSeconds(lawReadSeconds);
+        }
 
         for (int i = Mathf.CeilToInt(countdownSeconds); i > 0; i--)
         {
-            SetStatus(i.ToString(), false);
+            SetRoundMessage("Empieza en " + i);
             yield return new WaitForSeconds(1f);
         }
 
-        IsRoundActive = true;
         controlState.StartRound(roundSeconds);
-        SetStatus("A jugar", true);
+        currentState = AC_MatchState.Playing;
+        SetRoundMessage("A jugar");
 
         if (enableEnvironmentEvents && environmentEvents != null)
         {
+            environmentEvents.BeginMatch();
             environmentEvents.NotifyRoundStarted(roundNumber);
         }
 
-        while (controlState.IsActive && controlState.TiempoRestante > 0f)
+        while (currentState == AC_MatchState.Playing && controlState.IsActive && controlState.TiempoRestante > 0f)
         {
-            SetStatus("Ronda " + roundNumber + " | " + GetLawText(law) + " | " + Mathf.CeilToInt(controlState.TiempoRestante) + "s", false);
+            UpdateLiveHud(roundNumber);
             yield return null;
         }
 
         EndCurrentRound();
-        SetStatus("Resultado parcial: " + scoreP1 + " - " + scoreP2, true);
-        yield return new WaitForSeconds(1.5f);
+        SetRoundMessage("Resultado parcial: " + scoreP1 + " - " + scoreP2);
+        yield return new WaitForSeconds(1.25f);
     }
 
     public void RegisterHugAttempt(AC_PlayerController attacker, AC_PlayerController target, float attemptTime)
@@ -208,15 +223,21 @@ public class AC_GameManager : MonoBehaviour
             return;
         }
 
-        StartCoroutine(ResolveHugAfterMutualWindow(attacker, target));
+        if (pendingResolveRoutine != null)
+        {
+            StopCoroutine(pendingResolveRoutine);
+        }
+
+        pendingResolveRoutine = StartCoroutine(ResolveHugAfterMutualWindow(attacker, target, attemptTime));
     }
 
-    private IEnumerator ResolveHugAfterMutualWindow(AC_PlayerController attacker, AC_PlayerController target)
+    private IEnumerator ResolveHugAfterMutualWindow(AC_PlayerController attacker, AC_PlayerController target, float attemptTime)
     {
         yield return new WaitForSeconds(mutualWindow);
 
-        if (!IsRoundActive || resolvingPair)
+        if (!IsRoundActive || resolvingPair || attacker == null || target == null)
         {
+            pendingResolveRoutine = null;
             yield break;
         }
 
@@ -226,36 +247,37 @@ public class AC_GameManager : MonoBehaviour
         if (!enableSpecialLaws)
         {
             ResolveSimpleHug(attacker, target, mutual);
-            resolvingPair = false;
+            FinishPairResolution();
             yield break;
         }
 
         if (mutual)
         {
             ResolveMutual(attacker, target);
-            resolvingPair = false;
+            FinishPairResolution();
             yield break;
         }
 
         if (currentLaw == AC_HugLaw.AbrazoPorLaEspalda && !IsBehindTarget(attacker, target))
         {
-            SetStatus("No conto: tenia que ser por la espalda.", true);
-            resolvingPair = false;
+            SetRoundMessage("No conto: tenia que ser por la espalda");
+            FinishPairResolution();
             yield break;
         }
 
         if (currentLaw == AC_HugLaw.AbrazoCargado)
         {
             yield return StartCoroutine(ResolveChargedHug(attacker, target));
-            resolvingPair = false;
+            FinishPairResolution();
             yield break;
         }
 
         if (currentLaw == AC_HugLaw.ToqueMaldito)
         {
             AddScore(target, 1);
-            SetStatus("Toque maldito: punto para " + target.displayName, true);
-            resolvingPair = false;
+            SetRoundMessage("Toque maldito: punto para " + target.displayName);
+            PushApart(attacker, target);
+            FinishPairResolution();
             yield break;
         }
 
@@ -267,9 +289,15 @@ public class AC_GameManager : MonoBehaviour
         }
 
         AddScore(attacker, points);
-        SetStatus(attacker.displayName + " abrazo: +" + points, true);
+        SetRoundMessage(attacker.displayName + " abrazo: +" + points);
         PushApart(attacker, target);
+        FinishPairResolution();
+    }
+
+    private void FinishPairResolution()
+    {
         resolvingPair = false;
+        pendingResolveRoutine = null;
     }
 
     private void ResolveSimpleHug(AC_PlayerController attacker, AC_PlayerController target, bool mutual)
@@ -278,12 +306,12 @@ public class AC_GameManager : MonoBehaviour
         {
             AddScore(attacker, 1);
             AddScore(target, 1);
-            SetStatus("Abrazo mutuo: +1 para ambos", true);
+            SetRoundMessage("Abrazo mutuo: +1 para ambos");
         }
         else
         {
             AddScore(attacker, 1);
-            SetStatus(attacker.displayName + " abrazo: +1", true);
+            SetRoundMessage(attacker.displayName + " abrazo: +1");
         }
 
         PushApart(attacker, target);
@@ -295,17 +323,17 @@ public class AC_GameManager : MonoBehaviour
         {
             AddScore(a, 2);
             AddScore(b, 2);
-            SetStatus("Abrazo mutuo: +2 para ambos", true);
+            SetRoundMessage("Abrazo mutuo: +2 para ambos");
         }
         else if (currentLaw == AC_HugLaw.ToqueMaldito)
         {
             AddScore(a, 1);
             AddScore(b, 1);
-            SetStatus("Toque maldito mutuo: +1 para ambos", true);
+            SetRoundMessage("Toque maldito mutuo: +1 para ambos");
         }
         else
         {
-            SetStatus("Empate de abrazo", true);
+            SetRoundMessage("Empate de abrazo");
         }
 
         PushApart(a, b);
@@ -313,8 +341,8 @@ public class AC_GameManager : MonoBehaviour
 
     private IEnumerator ResolveChargedHug(AC_PlayerController attacker, AC_PlayerController target)
     {
-        SetStatus("Abrazo cargado...", true);
         float held = 0f;
+        SetRoundMessage("Abrazo cargado...");
 
         while (held < chargedMaxSeconds && IsRoundActive)
         {
@@ -339,7 +367,7 @@ public class AC_GameManager : MonoBehaviour
 
         int points = 1 + Mathf.FloorToInt(held);
         AddScore(attacker, points);
-        SetStatus("Abrazo cargado: +" + points + " para " + attacker.displayName, true);
+        SetRoundMessage("Abrazo cargado: +" + points + " para " + attacker.displayName);
         PushApart(attacker, target);
     }
 
@@ -369,16 +397,16 @@ public class AC_GameManager : MonoBehaviour
 
     private void PushApart(AC_PlayerController a, AC_PlayerController b)
     {
-        Vector3 dir = a.transform.position - b.transform.position;
-        dir.y = 0f;
-        if (dir.sqrMagnitude < 0.01f)
+        Vector3 direction = a.transform.position - b.transform.position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude < 0.01f)
         {
-            dir = a.transform.forward;
+            direction = a.transform.forward;
         }
 
-        dir.Normalize();
-        a.AddImpulse(dir * 7f, 0.12f);
-        b.AddImpulse(-dir * 7f, 0.12f);
+        direction.Normalize();
+        a.AddImpulse(direction * 7f, 0.12f);
+        b.AddImpulse(-direction * 7f, 0.12f);
     }
 
     public void PlayerFell(AC_PlayerController player)
@@ -388,21 +416,9 @@ public class AC_GameManager : MonoBehaviour
             return;
         }
 
+        CancelPlayerInteractions(player);
         AddScore(player, -1);
-
-        if (controlState != null)
-        {
-            if (player == player1)
-            {
-                controlState.RemoveLife(1);
-            }
-            else if (player == player2)
-            {
-                controlState.RemoveLife(2);
-            }
-        }
-
-        SetStatus(player.displayName + " cayo: -1", true);
+        SetRoundMessage(player.displayName + " cayo del mapa: -1");
 
         if (player == player1 && spawn1 != null)
         {
@@ -424,12 +440,84 @@ public class AC_GameManager : MonoBehaviour
         currentArenaRadius = Mathf.Max(0.5f, baseArenaRadius);
     }
 
+    public void SetEventLabel(string label)
+    {
+        currentEventLabel = label ?? string.Empty;
+    }
+
+    public string GetArenaBillboardText()
+    {
+        if (currentState == AC_MatchState.Pregame)
+        {
+            return "ABRAZO\nCOMPETITIVO";
+        }
+
+        if (!string.IsNullOrEmpty(currentEventLabel))
+        {
+            return currentEventLabel.ToUpperInvariant();
+        }
+
+        if (currentState == AC_MatchState.Playing || currentState == AC_MatchState.Countdown)
+        {
+            return GetLawText(currentLaw).ToUpperInvariant();
+        }
+
+        return currentMessage.ToUpperInvariant();
+    }
+
+    public string GetControlSignText(int playerNumber)
+    {
+        if (playerNumber == 1)
+        {
+            return "P1\nWASD mover\nQ saltar\nSpace abrazo\nShift dash\nCtrl bloqueo";
+        }
+
+        return "P2\nFlechas mover\nKeypad0 saltar\nEnter abrazo\nRShift dash\nRCtrl bloqueo";
+    }
+
+    private void PrepareMatchPresentation()
+    {
+        currentEventLabel = string.Empty;
+        ResetArenaRadius();
+        CurrentWindVelocity = Vector3.zero;
+        if (enableEnvironmentEvents && environmentEvents != null)
+        {
+            environmentEvents.BeginMatch();
+        }
+    }
+
+    private void CancelPlayerInteractions(AC_PlayerController player)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        player.CancelAllActions();
+
+        AC_PlayerController otherPlayer = player == player1 ? player2 : player1;
+        if (otherPlayer != null)
+        {
+            otherPlayer.HugDetector?.CancelHug();
+        }
+
+        if (pendingResolveRoutine != null)
+        {
+            StopCoroutine(pendingResolveRoutine);
+            pendingResolveRoutine = null;
+        }
+
+        resolvingPair = false;
+    }
+
     private void ResetMatchState()
     {
         controlState.ResetScoresAndLives(1);
         scoreP1 = 0;
         scoreP2 = 0;
         currentRoundIndex = 0;
+        currentLaw = AC_HugLaw.Normal;
+        currentState = AC_MatchState.Pregame;
         ResetRoundState();
         UpdateScoreUI();
     }
@@ -438,8 +526,11 @@ public class AC_GameManager : MonoBehaviour
     {
         firstHugAlreadyScored = false;
         resolvingPair = false;
+        currentEventLabel = string.Empty;
         CurrentWindVelocity = Vector3.zero;
         ResetArenaRadius();
+        player1?.CancelAllActions();
+        player2?.CancelAllActions();
     }
 
     private void ResetBothPlayers()
@@ -457,13 +548,11 @@ public class AC_GameManager : MonoBehaviour
 
     private void EndCurrentRound()
     {
-        IsRoundActive = false;
+        currentState = currentState == AC_MatchState.MatchEnd ? AC_MatchState.MatchEnd : AC_MatchState.RoundEnd;
         CurrentWindVelocity = Vector3.zero;
-
-        if (controlState != null)
-        {
-            controlState.EndRound();
-        }
+        controlState.EndRound();
+        player1?.CancelTransientActions();
+        player2?.CancelTransientActions();
     }
 
     private string BuildFinalStatus()
@@ -478,7 +567,7 @@ public class AC_GameManager : MonoBehaviour
             winner = scoreP1 > scoreP2 ? player1.displayName + " gana" : player2.displayName + " gana";
         }
 
-        return "FIN: " + winner + " | " + scoreP1 + " - " + scoreP2;
+        return "Fin: " + winner + " | " + scoreP1 + " - " + scoreP2;
     }
 
     private void ConfigurePlayerRespawns()
@@ -507,23 +596,8 @@ public class AC_GameManager : MonoBehaviour
             return;
         }
 
-        if (controlState != null)
-        {
-            controlState.AddScore(playerId, amount);
-            SyncScoresFromControl();
-        }
-        else
-        {
-            if (playerId == 1)
-            {
-                scoreP1 += amount;
-            }
-            else
-            {
-                scoreP2 += amount;
-            }
-        }
-
+        controlState.AddScore(playerId, amount);
+        SyncScoresFromControl();
         UpdateScoreUI();
     }
 
@@ -556,27 +630,6 @@ public class AC_GameManager : MonoBehaviour
         }
     }
 
-    private void RecenterArenaCylinderIfNeeded()
-    {
-        if (environmentEvents == null || environmentEvents.arenaVisual == null || arenaCenter == null)
-        {
-            return;
-        }
-
-        if (environmentEvents.arenaVisual.name != "ArenaCylinder")
-        {
-            return;
-        }
-
-        Vector3 target = arenaCenter.position;
-        Vector3 current = environmentEvents.arenaVisual.position;
-        float horizontalDeltaSqr = new Vector3(current.x - target.x, 0f, current.z - target.z).sqrMagnitude;
-        if (horizontalDeltaSqr > 0.0001f)
-        {
-            environmentEvents.arenaVisual.position = new Vector3(target.x, current.y, target.z);
-        }
-    }
-
     private void ValidateArenaReferences()
     {
         if (arenaCenter == null)
@@ -594,24 +647,10 @@ public class AC_GameManager : MonoBehaviour
                 }
             }
         }
-
-        if (arenaCenter != null && arenaCenter.name == "ArenaCenter")
-        {
-            GameObject arenaCylinder = GameObject.Find("ArenaCylinder");
-            if (arenaCylinder != null)
-            {
-                arenaCenter = arenaCylinder.transform;
-            }
-        }
     }
 
     private void SyncScoresFromControl()
     {
-        if (controlState == null)
-        {
-            return;
-        }
-
         scoreP1 = controlState.GetScore(1);
         scoreP2 = controlState.GetScore(2);
     }
@@ -629,6 +668,29 @@ public class AC_GameManager : MonoBehaviour
         scoreText.text = p1Name + ": " + scoreP1 + " | " + p2Name + ": " + scoreP2;
     }
 
+    private void UpdateLiveHud(int roundNumber)
+    {
+        string liveText = "Ronda " + roundNumber + " | " + GetLawText(currentLaw) + " | " + Mathf.CeilToInt(controlState.TiempoRestante) + "s";
+        if (!string.IsNullOrEmpty(currentEventLabel))
+        {
+            liveText += " | " + currentEventLabel;
+        }
+
+        SetStatus(liveText, false);
+    }
+
+    private void UpdateHudForIdle()
+    {
+        UpdateScoreUI();
+        SetStatus("Menu listo | Esperando iniciar", false);
+    }
+
+    private void SetRoundMessage(string text)
+    {
+        currentMessage = text;
+        SetStatus(text, true);
+    }
+
     private void SetStatus(string text, bool log)
     {
         if (statusText != null)
@@ -640,6 +702,82 @@ public class AC_GameManager : MonoBehaviour
         {
             Debug.Log(text);
             lastStatus = text;
+        }
+    }
+
+    private void ShowMainMenu(bool visible, string footerMessage)
+    {
+        if (mainMenuUI == null)
+        {
+            return;
+        }
+
+        mainMenuUI.ShowMenu(visible, footerMessage);
+    }
+
+    private void StopActiveCoroutines()
+    {
+        if (matchLoopRoutine != null)
+        {
+            StopCoroutine(matchLoopRoutine);
+            matchLoopRoutine = null;
+        }
+
+        if (pendingResolveRoutine != null)
+        {
+            StopCoroutine(pendingResolveRoutine);
+            pendingResolveRoutine = null;
+        }
+    }
+
+    private void EnsureCoreReferences()
+    {
+        if (controlState == null)
+        {
+            controlState = GetComponent<AC_Control>();
+        }
+
+        if (controlState == null)
+        {
+            controlState = gameObject.AddComponent<AC_Control>();
+        }
+    }
+
+    private void EnsurePresentationHelpers()
+    {
+        if (mainMenuUI == null)
+        {
+            mainMenuUI = GetComponent<AC_MainMenuUI>();
+        }
+
+        if (mainMenuUI == null)
+        {
+            mainMenuUI = gameObject.AddComponent<AC_MainMenuUI>();
+        }
+
+        if (sceneDecorator == null)
+        {
+            sceneDecorator = GetComponent<AC_SceneDecorator>();
+        }
+
+        if (sceneDecorator == null)
+        {
+            sceneDecorator = gameObject.AddComponent<AC_SceneDecorator>();
+        }
+
+        mainMenuUI.Configure(this);
+        sceneDecorator.Configure(this, spawn1, spawn2, arenaCenter);
+
+        Canvas canvas = FindFirstObjectByType<Canvas>();
+        if (canvas != null)
+        {
+            AC_UILayoutManager layoutManager = canvas.GetComponent<AC_UILayoutManager>();
+            if (layoutManager == null)
+            {
+                layoutManager = canvas.gameObject.AddComponent<AC_UILayoutManager>();
+            }
+
+            layoutManager.AutoWire(statusText, scoreText);
         }
     }
 
