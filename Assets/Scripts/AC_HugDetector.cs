@@ -10,7 +10,7 @@ public class AC_HugDetector : MonoBehaviour
     public float activeTime = 0.22f;
     public LayerMask playerMask;
 
-    [Header("Raycast de depuración / bloqueo")]
+    [Header("Raycast de depuracion / bloqueo")]
     public float chestHeight = 1f;
     public LayerMask blockersMask;
     public bool useLineOfSightRaycast = true;
@@ -26,51 +26,28 @@ public class AC_HugDetector : MonoBehaviour
     private void Awake()
     {
         owner = GetComponent<AC_PlayerController>();
-
-        if (owner != null)
-        {
-            ValidatePlayerMask();
-            EnsureVolumeVisual();
-            ConfigureVolumeVisualColliders();
-        }
-
-        if (playerMask.value == 0)
-        {
-            Debug.LogWarning("[AC_HugDetector] playerMask no estaba seteado. Se usa All para no bloquear detección.");
-            playerMask = -1;
-        }
+        ValidatePlayerMask();
+        EnsureVolumeVisual();
+        ConfigureVolumeVisualColliders();
     }
 
     private void ValidatePlayerMask()
     {
+        int playerLayer = LayerMask.NameToLayer("Player");
+        if (playerLayer != -1)
+        {
+            playerMask = 1 << playerLayer;
+            return;
+        }
+
         int ownerLayer = owner != null ? owner.gameObject.layer : -1;
-
-        if (playerMask.value == 0)
+        if (ownerLayer >= 0)
         {
-            int playerLayer = LayerMask.NameToLayer("Player");
-            if (playerLayer != -1)
-            {
-                playerMask = 1 << playerLayer;
-            }
-            else if (ownerLayer >= 0)
-            {
-                playerMask = 1 << ownerLayer;
-                Debug.LogWarning("[AC_HugDetector] No existe capa 'Player'. Se usó la capa del propietario.");
-            }
-            else
-            {
-                Debug.LogWarning("[AC_HugDetector] No se pudo resolver capa del propietario para playerMask.");
-            }
+            playerMask = 1 << ownerLayer;
+            return;
         }
 
-        if (playerMask.value != 0 && ownerLayer >= 0)
-        {
-            int ownerBit = 1 << ownerLayer;
-            if ((playerMask.value & ownerBit) == 0)
-            {
-                Debug.LogWarning("[AC_HugDetector] playerMask no incluye la capa del jugador propietario.");
-            }
-        }
+        playerMask = ~0;
     }
 
     private void EnsureVolumeVisual()
@@ -100,43 +77,45 @@ public class AC_HugDetector : MonoBehaviour
             {
                 volumeVisual = child.gameObject;
                 volumeVisual.SetActive(false);
-                Debug.LogWarning($"[AC_HugDetector] Se autoasignó un volumen aproximado de abrazo para {owner.name}: {volumeVisual.name}");
                 return;
             }
         }
-
-        Debug.LogWarning($"[AC_HugDetector] No se encontró volumen visual para {owner.name}. Se seguirá con detección por OverlapBox.");
     }
 
     private void ConfigureVolumeVisualColliders()
     {
-        if (volumeVisual == null || owner == null) return;
-
-        int ownerLayer = owner.gameObject.layer;
-        if (volumeVisual.layer != ownerLayer) return;
-
-        var colliders = volumeVisual.GetComponentsInChildren<Collider>(true);
-        foreach (var collider in colliders)
+        if (volumeVisual == null)
         {
-            if (collider == null) continue;
-            if (collider.enabled)
+            return;
+        }
+
+        Collider[] colliders = volumeVisual.GetComponentsInChildren<Collider>(true);
+        foreach (Collider collider in colliders)
+        {
+            if (collider != null)
             {
                 collider.enabled = false;
-                Debug.Log($"[AC_HugDetector] Se desactivó collider en '{volumeVisual.name}' para evitar detección física propia.");
             }
         }
     }
 
     public void StartHug()
     {
-        if (hugRoutine != null) StopCoroutine(hugRoutine);
+        if (hugRoutine != null)
+        {
+            StopCoroutine(hugRoutine);
+        }
+
         hugRoutine = StartCoroutine(HugRoutine());
     }
 
     private IEnumerator HugRoutine()
     {
         IsActive = true;
-        if (volumeVisual != null) volumeVisual.SetActive(true);
+        if (volumeVisual != null)
+        {
+            volumeVisual.SetActive(true);
+        }
 
         float timer = 0f;
         bool alreadyHit = false;
@@ -158,7 +137,11 @@ public class AC_HugDetector : MonoBehaviour
         }
 
         IsActive = false;
-        if (volumeVisual != null) volumeVisual.SetActive(false);
+        if (volumeVisual != null)
+        {
+            volumeVisual.SetActive(false);
+        }
+
         hugRoutine = null;
     }
 
@@ -170,10 +153,20 @@ public class AC_HugDetector : MonoBehaviour
         for (int i = 0; i < hits.Length; i++)
         {
             AC_PlayerController candidate = hits[i].GetComponentInParent<AC_PlayerController>();
+            if (candidate == null || candidate == owner)
+            {
+                continue;
+            }
 
-            if (candidate == null || candidate == owner) continue;
-            if (candidate.playerId == owner.playerId) continue;
-            if (!HasLineOfSight(candidate)) continue;
+            if (candidate.playerId == owner.playerId)
+            {
+                continue;
+            }
+
+            if (!HasLineOfSight(candidate))
+            {
+                continue;
+            }
 
             return candidate;
         }
@@ -183,7 +176,11 @@ public class AC_HugDetector : MonoBehaviour
 
     public bool IsTargetCloseForChargedHug(AC_PlayerController target, float maxDistance)
     {
-        if (target == null) return false;
+        if (target == null || owner == null)
+        {
+            return false;
+        }
+
         Vector3 a = new Vector3(owner.transform.position.x, 0f, owner.transform.position.z);
         Vector3 b = new Vector3(target.transform.position.x, 0f, target.transform.position.z);
         return Vector3.Distance(a, b) <= maxDistance;
@@ -191,18 +188,23 @@ public class AC_HugDetector : MonoBehaviour
 
     private bool HasLineOfSight(AC_PlayerController target)
     {
-        if (!useLineOfSightRaycast || blockersMask.value == 0) return true;
+        if (!useLineOfSightRaycast || blockersMask.value == 0)
+        {
+            return true;
+        }
 
         Vector3 origin = transform.position + Vector3.up * chestHeight;
         Vector3 targetPoint = target.transform.position + Vector3.up * chestHeight;
         Vector3 direction = targetPoint - origin;
         float distance = direction.magnitude;
 
-        if (distance <= 0.01f) return true;
-        direction /= distance;
+        if (distance <= 0.01f)
+        {
+            return true;
+        }
 
-        RaycastHit hit;
-        bool blocked = Physics.Raycast(origin, direction, out hit, distance, blockersMask, QueryTriggerInteraction.Ignore);
+        direction /= distance;
+        bool blocked = Physics.Raycast(origin, direction, out RaycastHit hit, distance, blockersMask, QueryTriggerInteraction.Ignore);
         Debug.DrawRay(origin, direction * distance, blocked ? Color.red : Color.green, 0.25f);
         return !blocked;
     }

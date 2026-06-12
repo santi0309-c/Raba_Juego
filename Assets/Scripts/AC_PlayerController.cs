@@ -13,15 +13,24 @@ public class AC_PlayerController : MonoBehaviour
     public KeyCode leftKey = KeyCode.A;
     public KeyCode rightKey = KeyCode.D;
     public KeyCode hugKey = KeyCode.Space;
+    public KeyCode alternateHugKey = KeyCode.None;
     public KeyCode dashKey = KeyCode.LeftShift;
+    public KeyCode alternateDashKey = KeyCode.None;
     public KeyCode holdKey = KeyCode.LeftControl;
+    public KeyCode alternateHoldKey = KeyCode.None;
     public KeyCode jumpKey = KeyCode.None;
 
     [Header("Movimiento")]
     public float moveSpeed = 5.5f;
     public float rotationSpeed = 12f;
+    public bool tankControls = true;
+    public float turnSpeedDegrees = 260f;
     public float gravity = -25f;
     public float fallY = -4f;
+
+    [Header("Camara")]
+    public bool moveRelativeToCamera = true;
+    public Transform movementCamera;
 
     [Header("Salto")]
     public float jumpForce = 8f;
@@ -42,32 +51,30 @@ public class AC_PlayerController : MonoBehaviour
     private AC_HugDetector hugDetector;
     private Rigidbody rigidBody;
     private Collider fallbackCollider;
+    private AC_Spawner spawnerHelper;
 
     private float normalRadius;
     private float normalHeight;
     private Vector3 normalCenter;
     private Vector3 verticalVelocity;
-
     private Vector3 dashVelocity;
     private float dashTimer;
     private float dashCooldownTimer;
-
     private Vector3 impulseVelocity;
     private float impulseTimer;
-
     private Vector3 lastNonZeroInput = Vector3.forward;
+    private float forwardInput;
+    private float turnInput;
     private float lastRespawnTime = -999f;
     private readonly float respawnProtectionDuration = 0.5f;
-    private AC_Spawner spawnerHelper;
 
     public bool IsHolding { get; private set; }
-    public bool IsDashing { get { return dashTimer > 0f; } }
+    public bool IsDashing => dashTimer > 0f;
     public float LastDashTime { get; private set; } = -999f;
     public float LastHugPressTime { get; private set; } = -999f;
-    public AC_HugDetector HugDetector { get { return hugDetector; } }
+    public AC_HugDetector HugDetector => hugDetector;
     public float DashCooldown => dashCooldown;
     public float DashCooldownRemaining => Mathf.Max(0f, dashCooldown - (Time.time - LastDashTime));
-
     public CharacterController CharacterController => controller;
 
     private void Awake()
@@ -76,24 +83,33 @@ public class AC_PlayerController : MonoBehaviour
         hugDetector = GetComponent<AC_HugDetector>();
         rigidBody = GetComponent<Rigidbody>();
         fallbackCollider = GetComponent<CapsuleCollider>();
-        normalRadius = controller.radius;
-        normalHeight = controller.height;
-        normalCenter = controller.center;
         spawnerHelper = GetComponent<AC_Spawner>();
+
         if (spawnerHelper == null)
         {
             spawnerHelper = gameObject.AddComponent<AC_Spawner>();
         }
 
+        normalRadius = controller.radius;
+        normalHeight = controller.height;
+        normalCenter = controller.center;
+
         spawnerHelper.enabled = true;
         spawnerHelper.autoRespawnOnFall = false;
         spawnerHelper.posicionEjeY = fallY;
 
-        // Si hay un NavMeshAgent pegado, lo desactivamos porque pelea con CharacterController.
         var navAgent = GetComponent<UnityEngine.AI.NavMeshAgent>();
-        if (navAgent != null) navAgent.enabled = false;
+        if (navAgent != null)
+        {
+            navAgent.enabled = false;
+        }
 
-        // Auto-asignar teclas según playerId si no fueron sobreescritas en Inspector.
+        ConfigureDefaultBindings();
+        NormalizePhysicsComponents();
+    }
+
+    private void ConfigureDefaultBindings()
+    {
         if (playerId == 2)
         {
             if (upKey == KeyCode.W) upKey = KeyCode.UpArrow;
@@ -101,23 +117,21 @@ public class AC_PlayerController : MonoBehaviour
             if (leftKey == KeyCode.A) leftKey = KeyCode.LeftArrow;
             if (rightKey == KeyCode.D) rightKey = KeyCode.RightArrow;
             if (hugKey == KeyCode.Space) hugKey = KeyCode.Return;
+            if (alternateHugKey == KeyCode.None) alternateHugKey = KeyCode.KeypadEnter;
             if (dashKey == KeyCode.LeftShift) dashKey = KeyCode.RightShift;
             if (holdKey == KeyCode.LeftControl) holdKey = KeyCode.RightControl;
             displayName = "Jugador 2";
         }
-
-        NormalizePhysicsComponents();
+        else
+        {
+            if (alternateHugKey == KeyCode.None) alternateHugKey = KeyCode.None;
+        }
     }
 
     private void NormalizePhysicsComponents()
     {
         if (rigidBody != null)
         {
-            if (!rigidBody.isKinematic || rigidBody.detectCollisions)
-            {
-                Debug.LogWarning("[AC_PlayerController] Rigidbody desactivado en " + name + " para evitar conflictos con CharacterController.");
-            }
-
             rigidBody.isKinematic = true;
             rigidBody.useGravity = false;
             rigidBody.detectCollisions = false;
@@ -125,26 +139,15 @@ public class AC_PlayerController : MonoBehaviour
 
         if (fallbackCollider != null)
         {
-            if (fallbackCollider.enabled)
-            {
-                Debug.LogWarning("[AC_PlayerController] Collider secundario desactivado en " + name + " para evitar doble colision con CharacterController.");
-            }
-
             fallbackCollider.enabled = false;
         }
     }
 
     public void SyncControllerSettingsFrom(AC_PlayerController source)
     {
-        if (source == null || source.controller == null || controller == null || source == this) return;
-
-        if (!Mathf.Approximately(controller.height, source.controller.height) ||
-            !Mathf.Approximately(controller.radius, source.controller.radius) ||
-            controller.center != source.controller.center ||
-            !Mathf.Approximately(controller.stepOffset, source.controller.stepOffset) ||
-            !Mathf.Approximately(controller.minMoveDistance, source.controller.minMoveDistance))
+        if (source == null || source.controller == null || controller == null || source == this)
         {
-            Debug.LogWarning($"[AC_PlayerController] Ajustando CharacterController de {name} para emparejar al de {source.name}.");
+            return;
         }
 
         controller.height = source.controller.height;
@@ -175,22 +178,23 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         Vector3 input = ReadInputDirection();
-        bool wantsHold = Input.GetKey(holdKey) && input.sqrMagnitude < 0.01f && !IsDashing;
+        bool hasControlInput = Mathf.Abs(forwardInput) > 0.01f || Mathf.Abs(turnInput) > 0.01f;
+        bool wantsHold = IsActionHeld(holdKey, alternateHoldKey) && !hasControlInput && !IsDashing;
         SetHolding(wantsHold);
 
-        if (Input.GetKeyDown(hugKey) && hugDetector != null && !IsHolding)
+        if (IsActionPressed(hugKey, alternateHugKey) && hugDetector != null && !IsHolding)
         {
             LastHugPressTime = Time.time;
             hugDetector.StartHug();
         }
 
         dashCooldownTimer -= Time.deltaTime;
-        if (Input.GetKeyDown(dashKey) && dashCooldownTimer <= 0f && !IsHolding)
+        if (IsActionPressed(dashKey, alternateDashKey) && dashCooldownTimer <= 0f && !IsHolding)
         {
             StartDash(input);
         }
 
-        if (Input.GetKeyDown(jumpKey) && IsGrounded() && !IsHolding)
+        if (jumpKey != KeyCode.None && Input.GetKeyDown(jumpKey) && IsGrounded() && !IsHolding)
         {
             verticalVelocity.y = jumpForce;
         }
@@ -208,28 +212,89 @@ public class AC_PlayerController : MonoBehaviour
         if (Input.GetKey(downKey)) z -= 1f;
         if (Input.GetKey(upKey)) z += 1f;
 
+        turnInput = Mathf.Clamp(x, -1f, 1f);
+        forwardInput = Mathf.Clamp(z, -1f, 1f);
+
+        if (tankControls)
+        {
+            return Mathf.Abs(forwardInput) > 0.01f ? transform.forward * forwardInput : Vector3.zero;
+        }
+
         Vector3 dir = new Vector3(x, 0f, z);
-        if (dir.sqrMagnitude > 1f) dir.Normalize();
+        if (dir.sqrMagnitude > 1f)
+        {
+            dir.Normalize();
+        }
+
+        if (moveRelativeToCamera && dir.sqrMagnitude > 0.01f)
+        {
+            Transform cameraTransform = ResolveMovementCamera();
+            if (cameraTransform != null)
+            {
+                Vector3 cameraForward = cameraTransform.forward;
+                cameraForward.y = 0f;
+                cameraForward.Normalize();
+
+                Vector3 cameraRight = cameraTransform.right;
+                cameraRight.y = 0f;
+                cameraRight.Normalize();
+
+                dir = cameraRight * dir.x + cameraForward * dir.z;
+                if (dir.sqrMagnitude > 1f)
+                {
+                    dir.Normalize();
+                }
+            }
+        }
+
         if (dir.sqrMagnitude > 0.01f)
         {
             lastNonZeroInput = dir.normalized;
         }
+
         return dir;
+    }
+
+    private Transform ResolveMovementCamera()
+    {
+        if (movementCamera != null)
+        {
+            return movementCamera;
+        }
+
+        Camera mainCamera = Camera.main;
+        return mainCamera != null ? mainCamera.transform : null;
     }
 
     private void MovePlayer(Vector3 input)
     {
+        Vector3 movementInput = input;
         Vector3 horizontal = Vector3.zero;
+
+        if (tankControls)
+        {
+            if (Mathf.Abs(turnInput) > 0.01f && !IsHolding)
+            {
+                transform.Rotate(Vector3.up, turnInput * turnSpeedDegrees * Time.deltaTime, Space.World);
+            }
+
+            movementInput = Mathf.Abs(forwardInput) > 0.01f ? transform.forward * forwardInput : Vector3.zero;
+            if (movementInput.sqrMagnitude > 0.01f)
+            {
+                lastNonZeroInput = movementInput.normalized;
+            }
+        }
 
         if (!IsHolding)
         {
-            horizontal = input * moveSpeed;
+            horizontal = movementInput * moveSpeed;
         }
 
-        if (input.sqrMagnitude > 0.01f && !IsHolding)
+        if (!tankControls && movementInput.sqrMagnitude > 0.01f && !IsHolding)
         {
-            Quaternion targetRot = Quaternion.LookRotation(input, Vector3.up);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationSpeed * Time.deltaTime);
+            Quaternion targetRot = Quaternion.LookRotation(movementInput, Vector3.up);
+            float maxDegreesDelta = Mathf.Max(90f, rotationSpeed * 90f) * Time.deltaTime;
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRot, maxDegreesDelta);
         }
 
         if (dashTimer > 0f)
@@ -264,12 +329,11 @@ public class AC_PlayerController : MonoBehaviour
         {
             verticalVelocity.y = -2f;
         }
+
         verticalVelocity.y += gravity * Time.deltaTime;
 
         Vector3 motion = (horizontal + verticalVelocity) * Time.deltaTime;
-
         motion = ClampMotionToArena(motion);
-
         controller.Move(motion);
     }
 
@@ -334,27 +398,26 @@ public class AC_PlayerController : MonoBehaviour
     private Vector3 ClampMotionToArena(Vector3 motion)
     {
         if (AC_GameManager.Instance == null || AC_GameManager.Instance.arenaCenter == null)
+        {
             return motion;
+        }
 
         Vector3 center = AC_GameManager.Instance.arenaCenter.position;
         Vector3 currentPos = transform.position;
         Vector3 nextPos = currentPos + motion;
-
         Vector3 flatCenter = new Vector3(center.x, 0f, center.z);
+        Vector3 flatCurrent = new Vector3(currentPos.x, 0f, currentPos.z);
         Vector3 flatNext = new Vector3(nextPos.x, 0f, nextPos.z);
+        Vector3 dirCurrent = flatCurrent - flatCenter;
         Vector3 dirFromCenter = flatNext - flatCenter;
 
-        Vector3 flatCurrent = new Vector3(currentPos.x, 0f, currentPos.z);
-        Vector3 dirCurrent = flatCurrent - flatCenter;
-
-        float maxRadius = AC_GameManager.Instance.CurrentArenaRadius;
+        float maxRadius = Mathf.Max(0.5f, AC_GameManager.Instance.CurrentArenaRadius);
         if (dirCurrent.magnitude > maxRadius + 0.05f)
         {
             dirCurrent = dirCurrent.normalized;
             Vector3 safePos = flatCenter + dirCurrent * (maxRadius - 0.1f);
             safePos.y = currentPos.y;
-            motion = safePos - currentPos;
-            return motion;
+            return safePos - currentPos;
         }
 
         if (dirFromCenter.magnitude > maxRadius)
@@ -370,8 +433,15 @@ public class AC_PlayerController : MonoBehaviour
 
     private void CheckFall()
     {
-        if (AC_GameManager.Instance == null) return;
-        if (Time.time - lastRespawnTime < respawnProtectionDuration) return;
+        if (AC_GameManager.Instance == null)
+        {
+            return;
+        }
+
+        if (Time.time - lastRespawnTime < respawnProtectionDuration)
+        {
+            return;
+        }
 
         Transform center = AC_GameManager.Instance.arenaCenter;
         Vector3 c = center != null ? center.position : Vector3.zero;
@@ -414,7 +484,10 @@ public class AC_PlayerController : MonoBehaviour
 
     private void ClampRespawnPosition(ref Vector3 position)
     {
-        if (AC_GameManager.Instance == null) return;
+        if (AC_GameManager.Instance == null)
+        {
+            return;
+        }
 
         Transform centerTransform = AC_GameManager.Instance.arenaCenter;
         if (centerTransform != null)
@@ -434,5 +507,17 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         position.y = Mathf.Max(position.y, fallY + 1f);
+    }
+
+    private bool IsActionPressed(KeyCode primary, KeyCode secondary)
+    {
+        return (primary != KeyCode.None && Input.GetKeyDown(primary)) ||
+               (secondary != KeyCode.None && Input.GetKeyDown(secondary));
+    }
+
+    private bool IsActionHeld(KeyCode primary, KeyCode secondary)
+    {
+        return (primary != KeyCode.None && Input.GetKey(primary)) ||
+               (secondary != KeyCode.None && Input.GetKey(secondary));
     }
 }

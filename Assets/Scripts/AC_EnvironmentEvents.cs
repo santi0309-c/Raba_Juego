@@ -11,7 +11,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
         NieblaBaja
     }
 
-    [Header("Evento único por partida")]
+    [Header("Evento Ãºnico por partida")]
     public int minRound = 2;
     public int maxRound = 4;
     public float minDelayInsideRound = 8f;
@@ -39,6 +39,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
     private Vector3 originalArenaScale;
     private Quaternion originalArenaRotation;
 
+    // Estado original de niebla
     private bool originalFogEnabled;
     private float originalFogDensity;
     private Color originalFogColor;
@@ -49,7 +50,10 @@ public class AC_EnvironmentEvents : MonoBehaviour
         if (arenaVisual == null) return;
 
         GameObject centerObject = FindArenaCenterOrCylinder();
-        if (centerObject == null) return;
+        if (centerObject == null)
+        {
+            return;
+        }
 
         if (arenaVisual.name == "ArenaCenter")
         {
@@ -63,7 +67,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
 
         centerObject = FindArenaCenterOrCylinder();
         if (centerObject == null) return;
-
         Vector3 target = centerObject.transform.position;
         Vector3 current = arenaVisual.position;
         arenaVisual.position = new Vector3(target.x, current.y, target.z);
@@ -87,6 +90,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
             originalArenaRotation = arenaVisual.localRotation;
         }
 
+        // Guardar estado original de niebla
         originalFogEnabled = RenderSettings.fog;
         originalFogDensity = RenderSettings.fogDensity;
         originalFogColor = RenderSettings.fogColor;
@@ -163,12 +167,14 @@ public class AC_EnvironmentEvents : MonoBehaviour
         Debug.Log("FIN EVENTO: La arena se achica");
     }
 
+    // FIX #5: Piso inclinado â€” rota 20Â° la arena durante el evento
     private IEnumerator TiltEvent(float duration)
     {
         if (arenaVisual == null) yield break;
 
         Debug.Log("EVENTO: El piso se inclina");
 
+        // Elegir una direcciÃ³n aleatoria para la inclinaciÃ³n
         Vector3 tiltAxis = Random.value < 0.5f ? Vector3.forward : Vector3.right;
         Quaternion targetRotation = originalArenaRotation * Quaternion.AngleAxis(tiltAngle, tiltAxis);
 
@@ -177,15 +183,17 @@ public class AC_EnvironmentEvents : MonoBehaviour
         {
             elapsed += Time.deltaTime;
 
+            // Entrada suave: lerp hacia la inclinaciÃ³n
             if (arenaVisual != null)
             {
-                float t = Mathf.Clamp01(elapsed / 2f);
+                float t = Mathf.Clamp01(elapsed / 2f); // 2 segundos para entrar
                 arenaVisual.localRotation = Quaternion.Slerp(arenaVisual.localRotation, targetRotation, Time.deltaTime * tiltSmoothSpeed);
             }
 
             yield return null;
         }
 
+        // Restaurar rotaciÃ³n original suavemente
         float restoreTimer = 0f;
         while (restoreTimer < 2f && arenaVisual != null)
         {
@@ -198,6 +206,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
         Debug.Log("FIN EVENTO: El piso se inclina");
     }
 
+    // FIX #5: Niebla baja â€” reduce visibilidad drÃ¡sticamente durante el evento
     private IEnumerator FogEvent(float duration)
     {
         Debug.Log("EVENTO: Niebla baja");
@@ -209,6 +218,7 @@ public class AC_EnvironmentEvents : MonoBehaviour
 
         yield return new WaitForSeconds(duration);
 
+        // Restaurar estado original de niebla
         RenderSettings.fog = originalFogEnabled;
         RenderSettings.fogDensity = originalFogDensity;
         RenderSettings.fogColor = originalFogColor;

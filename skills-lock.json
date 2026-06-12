@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "unity-developer": {
+      "source": "rmyndharis/antigravity-skills",
+      "sourceType": "github",
+      "skillPath": "skills/unity-developer/SKILL.md",
+      "computedHash": "f86726688ba75a631da0b73089c35f89d46dd8bf5c7072ea5c601cadb3d02d25"
+    },
+    "unity-ecs-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/game-development/skills/unity-ecs-patterns/SKILL.md",
+      "computedHash": "69b09dcd30b88cbb71e5854e05506f8c353a886a15e1ed48ece51d107559cdd8"
+    }
+  }
+}

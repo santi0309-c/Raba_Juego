@@ -26,8 +26,10 @@ public class AC_GameManager : MonoBehaviour
     [Header("Arena")]
     public Transform arenaCenter;
     public float baseArenaRadius = 7.5f;
-    public float CurrentArenaRadius { get; private set; }
-    public Vector3 CurrentWindVelocity { get; set; }
+    [SerializeField] private float currentArenaRadius;
+    [SerializeField] private Vector3 currentWindVelocity;
+    public float CurrentArenaRadius { get { return currentArenaRadius; } }
+    public Vector3 CurrentWindVelocity { get { return currentWindVelocity; } set { currentWindVelocity = value; } }
 
     [Header("Rondas")]
     public int roundsToPlay = 5;
@@ -43,6 +45,8 @@ public class AC_GameManager : MonoBehaviour
     [Header("Feedback opcional")]
     public Text statusText;
     public Text scoreText;
+    [Tooltip("Control de puntaje/vida/temporizador inspirado en control.cs del profe")]
+    public AC_Control controlState;
 
     [Header("Eventos de entorno")]
     public AC_EnvironmentEvents environmentEvents;
@@ -66,15 +70,104 @@ public class AC_GameManager : MonoBehaviour
             Destroy(gameObject);
             return;
         }
+
         Instance = this;
-        CurrentArenaRadius = baseArenaRadius;
+
+        if (controlState == null)
+        {
+            controlState = GetComponent<AC_Control>();
+        }
+        if (controlState == null)
+        {
+            controlState = gameObject.AddComponent<AC_Control>();
+        }
+        controlState.ResetScoresAndLives(1);
+
+        currentArenaRadius = baseArenaRadius;
+        currentWindVelocity = Vector3.zero;
     }
 
     private void Start()
     {
+        ValidateArenaReferences();
+
+        if (spawn1 == null || spawn2 == null)
+        {
+            Debug.LogWarning("[AC_GameManager] No hay spawn1/spawn2 configurados. Los respawns pueden fallar.");
+        }
+
+        ConfigurePlayerRespawns();
+        SynchronizePlayerControllers();
         BuildLawOrder();
-        if (environmentEvents != null) environmentEvents.BeginMatch();
+
+        if (environmentEvents != null)
+        {
+            if (environmentEvents.arenaVisual == null && arenaCenter != null)
+            {
+                environmentEvents.arenaVisual = arenaCenter;
+                Debug.Log("[AC_GameManager] arenaVisual faltante en AC_EnvironmentEvents: se usa arenaCenter.");
+            }
+
+            environmentEvents.EnsureArenaVisualAligned();
+            RecenterArenaCylinderIfNeeded();
+            environmentEvents.BeginMatch();
+        }
         StartCoroutine(MatchLoop());
+    }
+
+    private void RecenterArenaCylinderIfNeeded()
+    {
+        if (environmentEvents == null || environmentEvents.arenaVisual == null) return;
+        if (arenaCenter == null) return;
+
+        if (environmentEvents.arenaVisual.name != "ArenaCylinder")
+        {
+            return;
+        }
+
+        Vector3 target = arenaCenter.position;
+        Vector3 current = environmentEvents.arenaVisual.position;
+        float horizontalDeltaSqr = new Vector3(current.x - target.x, 0f, current.z - target.z).sqrMagnitude;
+        if (horizontalDeltaSqr > 0.0001f)
+        {
+            environmentEvents.arenaVisual.position = new Vector3(target.x, current.y, target.z);
+            Debug.Log("[AC_GameManager] ArenaCylinder recenterizado sobre arenaCenter.");
+        }
+    }
+
+    private void ValidateArenaReferences()
+    {
+        if (arenaCenter == null)
+        {
+            if (environmentEvents != null && environmentEvents.arenaVisual != null)
+            {
+                arenaCenter = environmentEvents.arenaVisual;
+                Debug.LogWarning("[AC_GameManager] arenaCenter faltante. Se usó AC_EnvironmentEvents.arenaVisual.");
+            }
+            else
+            {
+                Debug.LogWarning("[AC_GameManager] arenaCenter y environmentEvents.arenaVisual no están asignados. Se pueden desalinear límites/recorte.");
+            }
+        }
+
+        if (arenaCenter != null && arenaCenter.name == "ArenaCenter")
+        {
+            GameObject arenaCylinder = GameObject.Find("ArenaCylinder");
+            if (arenaCylinder != null)
+            {
+                arenaCenter = arenaCylinder.transform;
+                Debug.Log("[AC_GameManager] arenaCenter corregido a ArenaCylinder por nombre.");
+            }
+        }
+    }
+
+    private void SynchronizePlayerControllers()
+    {
+        if (player1 == null || player2 == null) return;
+        if (player1 == player2) return;
+
+        player1.SyncControllerSettingsFrom(player2);
+        player2.SyncControllerSettingsFrom(player1);
     }
 
     private void BuildLawOrder()
@@ -112,6 +205,11 @@ public class AC_GameManager : MonoBehaviour
         }
 
         IsRoundActive = false;
+        if (controlState != null)
+        {
+            controlState.EndRound();
+        }
+
         string winner = scoreP1 == scoreP2 ? "Empate final" : (scoreP1 > scoreP2 ? player1.displayName + " gana" : player2.displayName + " gana");
         SetStatus("FIN: " + winner + " | " + scoreP1 + " - " + scoreP2);
     }
@@ -120,7 +218,6 @@ public class AC_GameManager : MonoBehaviour
     {
         ResetBothPlayers();
         firstHugAlreadyScored = false;
-        // FIX: resetear resolvingPair al inicio de cada ronda
         resolvingPair = false;
         CurrentWindVelocity = Vector3.zero;
 
@@ -134,18 +231,41 @@ public class AC_GameManager : MonoBehaviour
         }
 
         IsRoundActive = true;
-        SetStatus("¡ABRÁCENSE!");
-        if (environmentEvents != null) environmentEvents.NotifyRoundStarted(roundNumber);
-
-        float timer = roundSeconds;
-        while (timer > 0f)
+        if (controlState != null)
         {
-            timer -= Time.deltaTime;
-            SetStatus("Ronda " + roundNumber + " | " + GetLawText(law) + " | " + Mathf.CeilToInt(timer) + "s");
-            yield return null;
+            controlState.StartRound(roundSeconds);
+        }
+        SetStatus("¡Abrácense!");
+
+        if (environmentEvents != null)
+        {
+            environmentEvents.NotifyRoundStarted(roundNumber);
         }
 
-        // FIX: limpiar viento al terminar ronda también
+        if (controlState != null)
+        {
+            while (controlState.IsActive && controlState.TiempoRestante > 0f)
+            {
+                SetStatus("Ronda " + roundNumber + " | " + GetLawText(law) + " | " + Mathf.CeilToInt(controlState.TiempoRestante) + "s");
+                yield return null;
+            }
+        }
+        else
+        {
+            float timer = roundSeconds;
+            while (timer > 0f)
+            {
+                timer -= Time.deltaTime;
+                SetStatus("Ronda " + roundNumber + " | " + GetLawText(law) + " | " + Mathf.CeilToInt(timer) + "s");
+                yield return null;
+            }
+        }
+
+        if (controlState != null)
+        {
+            controlState.EndRound();
+        }
+
         CurrentWindVelocity = Vector3.zero;
         IsRoundActive = false;
         SetStatus("Resultado parcial: " + scoreP1 + " - " + scoreP2);
@@ -217,7 +337,6 @@ public class AC_GameManager : MonoBehaviour
             AddScore(b, 2);
             SetStatus("Abrazo mutuo: +2 para ambos");
         }
-        // FIX #4: ToqueMaldito con abrazo mutuo — ambos fueron abrazados, ambos suman +1
         else if (currentLaw == AC_HugLaw.ToqueMaldito)
         {
             AddScore(a, 1);
@@ -288,6 +407,13 @@ public class AC_GameManager : MonoBehaviour
     {
         if (!IsRoundActive || player == null) return;
         AddScore(player, -1);
+
+        if (controlState != null)
+        {
+            if (player == player1) controlState.RemoveLife(1);
+            else if (player == player2) controlState.RemoveLife(2);
+        }
+
         SetStatus(player.displayName + " cayó: -1");
 
         if (player == player1 && spawn1 != null)
@@ -308,13 +434,47 @@ public class AC_GameManager : MonoBehaviour
 
     private void AddScore(AC_PlayerController player, int amount)
     {
-        if (player == player1) scoreP1 += amount;
-        else if (player == player2) scoreP2 += amount;
+        if (player == null || amount == 0) return;
+        int playerId = player == player1 ? 1 : (player == player2 ? 2 : 0);
+        if (playerId == 0) return;
+
+        if (controlState != null)
+        {
+            controlState.AddScore(playerId, amount);
+            SyncScoresFromControl();
+        }
+        else
+        {
+            if (playerId == 1) scoreP1 += amount;
+            else scoreP2 += amount;
+        }
+
         UpdateScoreUI();
+    }
+
+    private void ConfigurePlayerRespawns()
+    {
+        if (player1 != null && spawn1 != null)
+        {
+            player1.SetRespawnPoint(spawn1);
+        }
+
+        if (player2 != null && spawn2 != null)
+        {
+            player2.SetRespawnPoint(spawn2);
+        }
+    }
+
+    private void SyncScoresFromControl()
+    {
+        if (controlState == null) return;
+        scoreP1 = controlState.GetScore(1);
+        scoreP2 = controlState.GetScore(2);
     }
 
     private void UpdateScoreUI()
     {
+        SyncScoresFromControl();
         if (scoreText != null)
         {
             string p1Name = player1 != null ? player1.displayName : "P1";
@@ -331,12 +491,12 @@ public class AC_GameManager : MonoBehaviour
 
     public void SetArenaRadius(float radius)
     {
-        CurrentArenaRadius = Mathf.Max(0.5f, radius);
+        currentArenaRadius = Mathf.Max(0.5f, radius);
     }
 
     public void ResetArenaRadius()
     {
-        CurrentArenaRadius = baseArenaRadius;
+        currentArenaRadius = baseArenaRadius;
     }
 
     private string GetLawText(AC_HugLaw law)
