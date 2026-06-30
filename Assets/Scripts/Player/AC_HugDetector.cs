@@ -1,27 +1,25 @@
 using System.Collections;
 using UnityEngine;
 
-[RequireComponent(typeof(AC_PlayerController))]
 public class AC_HugDetector : MonoBehaviour
 {
-    [Header("Volumen de abrazo")]
     public Vector3 localBoxCenter = new Vector3(0f, 1f, 0.85f);
     public Vector3 halfExtents = new Vector3(0.65f, 0.65f, 0.55f);
     public float activeTime = 0.22f;
+    public float hitWindowStart = 0.65f;
+    public float hitWindowEnd = 0.95f;
     public LayerMask playerMask;
 
-    [Header("Raycast de depuracion / bloqueo")]
     public float chestHeight = 1f;
     public LayerMask blockersMask;
     public bool useLineOfSightRaycast = true;
 
-    [Header("Visual opcional")]
     public GameObject volumeVisual;
 
     private AC_PlayerController owner;
     private Coroutine hugRoutine;
 
-    public bool IsActive { get; private set; }
+    public bool IsActive;
 
     private void Awake()
     {
@@ -142,13 +140,23 @@ public class AC_HugDetector : MonoBehaviour
 
         while (timer < activeTime)
         {
-            if (!alreadyHit)
+            float normalized;
+            if (activeTime > 0f)
+            {
+                normalized = timer / activeTime;
+            }
+            else
+            {
+                normalized = 1f;
+            }
+
+            if (!alreadyHit && normalized >= hitWindowStart && normalized <= hitWindowEnd)
             {
                 AC_PlayerController target = FindTargetInHugVolume();
                 if (target != null && AC_GameManager.Instance != null)
                 {
                     alreadyHit = true;
-                    AC_GameManager.Instance.RegisterHugAttempt(owner, target, Time.time);
+                    AC_GameManager.Instance.RegisterHugAttempt(owner, target, owner.LastHugPressTime);
                 }
             }
 
@@ -179,6 +187,11 @@ public class AC_HugDetector : MonoBehaviour
             }
 
             if (candidate.playerId == owner.playerId)
+            {
+                continue;
+            }
+
+            if (candidate.IsBlocking)
             {
                 continue;
             }
@@ -223,19 +236,9 @@ public class AC_HugDetector : MonoBehaviour
             return true;
         }
 
-        direction /= distance;
+        direction = direction / distance;
         bool blocked = Physics.Raycast(origin, direction, out RaycastHit hit, distance, blockersMask, QueryTriggerInteraction.Ignore);
         Debug.DrawRay(origin, direction * distance, blocked ? Color.red : Color.green, 0.25f);
         return !blocked;
-    }
-
-    private void OnDrawGizmosSelected()
-    {
-        Vector3 center = transform.TransformPoint(localBoxCenter);
-        Gizmos.color = Color.magenta;
-        Matrix4x4 oldMatrix = Gizmos.matrix;
-        Gizmos.matrix = Matrix4x4.TRS(center, transform.rotation, Vector3.one);
-        Gizmos.DrawWireCube(Vector3.zero, halfExtents * 2f);
-        Gizmos.matrix = oldMatrix;
     }
 }

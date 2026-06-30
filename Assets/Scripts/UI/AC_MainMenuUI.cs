@@ -5,45 +5,48 @@ using UnityEngine.UI;
 
 public class AC_MainMenuUI : MonoBehaviour
 {
-    [Header("Prefab (opcional — si se asigna, no se crea nada procedural)")]
     public GameObject menuPrefab;
+    public int startupCountdownFrom = 3;
 
     private AC_GameManager gameManager;
     private Canvas canvas;
     private GameObject menuRoot;
     private Text footerText;
     private Font uiFont;
+    private Text countdownText;
 
     public void Configure(AC_GameManager manager)
     {
         gameManager = manager;
 
-        // Si hay prefab asignado, usarlo
         if (menuPrefab != null)
         {
             menuRoot = Instantiate(menuPrefab);
             menuRoot.name = "AC_MainMenu";
             canvas = menuRoot.GetComponentInParent<Canvas>();
             if (canvas == null)
+            {
                 canvas = FindFirstObjectByType<Canvas>();
+            }
 
-            // Buscar footer text por nombre
             Transform footerTransform = menuRoot.transform.Find("Footer");
             if (footerTransform != null)
+            {
                 footerText = footerTransform.GetComponent<Text>();
+            }
 
-            // Conectar botones
             ConectarBoton("PlayButton", OnPlayPressed);
             ConectarBoton("ExitButton", OnExitPressed);
 
             EnsureEventSystem();
+            EnsureCountdownText();
             return;
         }
 
-        // Fallback: crear todo procedural (como antes)
         EnsureCanvas();
         EnsureEventSystem();
         EnsureMenu();
+        EnsureCountdownText();
     }
 
     private void ConectarBoton(string nombre, UnityEngine.Events.UnityAction accion)
@@ -59,56 +62,78 @@ public class AC_MainMenuUI : MonoBehaviour
         }
     }
 
+    public void HideMenuRoot()
+    {
+        EnsureMenu();
+        if (menuRoot != null)
+        {
+            menuRoot.SetActive(false);
+        }
+    }
+
+    private Coroutine countdownRoutine;
+
     public void ShowMenu(bool visible, string footerMessage)
     {
         EnsureMenu();
         if (menuRoot == null) return;
 
         if (footerText != null)
+        {
             footerText.text = footerMessage;
-
-        StopAllCoroutines();
-        StartCoroutine(TransicionMenu(visible));
-    }
-
-    private IEnumerator TransicionMenu(bool visible)
-    {
-        CanvasGroup cg = menuRoot.GetComponent<CanvasGroup>();
-        if (cg == null)
-            cg = menuRoot.AddComponent<CanvasGroup>();
+        }
 
         if (visible)
         {
+            StopCountdown();
             menuRoot.SetActive(true);
-            cg.alpha = 0f;
-            menuRoot.transform.localScale = Vector3.one * 0.95f;
-
-            float timer = 0f;
-            while (timer < 0.4f)
-            {
-                timer += Time.deltaTime;
-                float t = timer / 0.4f;
-                cg.alpha = Mathf.Lerp(0f, 1f, t);
-                menuRoot.transform.localScale = Vector3.Lerp(Vector3.one * 0.95f, Vector3.one, t);
-                yield return null;
-            }
-
-            cg.alpha = 1f;
-            menuRoot.transform.localScale = Vector3.one;
         }
         else
         {
-            float timer = 0f;
-            float startAlpha = cg.alpha;
-            while (timer < 0.25f)
-            {
-                timer += Time.deltaTime;
-                cg.alpha = Mathf.Lerp(startAlpha, 0f, timer / 0.25f);
-                yield return null;
-            }
-
-            cg.alpha = 0f;
             menuRoot.SetActive(false);
+        }
+    }
+
+    public IEnumerator RunStartupCountdown()
+    {
+        if (countdownRoutine != null)
+        {
+            StopCoroutine(countdownRoutine);
+        }
+        countdownRoutine = StartCoroutine(CuentaRegresiva());
+        yield return countdownRoutine;
+    }
+
+    private IEnumerator CuentaRegresiva()
+    {
+        HideMenuRoot();
+        EnsureCountdownText();
+        if (countdownText == null)
+        {
+            yield break;
+        }
+
+        for (int i = startupCountdownFrom; i > 0; i--)
+        {
+            countdownText.text = i.ToString();
+            countdownText.gameObject.SetActive(true);
+            yield return new WaitForSeconds(1f);
+        }
+
+        countdownText.gameObject.SetActive(false);
+        countdownRoutine = null;
+    }
+
+    public void StopCountdown()
+    {
+        if (countdownRoutine != null)
+        {
+            StopCoroutine(countdownRoutine);
+            countdownRoutine = null;
+        }
+        if (countdownText != null)
+        {
+            countdownText.gameObject.SetActive(false);
         }
     }
 
@@ -162,28 +187,33 @@ public class AC_MainMenuUI : MonoBehaviour
             return;
         }
 
-        menuRoot = new GameObject("AC_MainMenu", typeof(RectTransform), typeof(Image));
+        menuRoot = new GameObject("AC_MainMenu", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
         menuRoot.transform.SetParent(canvas.transform, false);
 
         RectTransform rootRect = menuRoot.GetComponent<RectTransform>();
-        rootRect.anchorMin = Vector2.zero;
-        rootRect.anchorMax = Vector2.one;
-        rootRect.offsetMin = Vector2.zero;
-        rootRect.offsetMax = Vector2.zero;
+        rootRect.anchorMin = new Vector2(0.5f, 0.5f);
+        rootRect.anchorMax = new Vector2(0.5f, 0.5f);
+        rootRect.pivot = new Vector2(0.5f, 0.5f);
+        rootRect.anchoredPosition = Vector2.zero;
+        rootRect.sizeDelta = new Vector2(760f, 720f);
 
         Image rootImage = menuRoot.GetComponent<Image>();
-        rootImage.color = new Color(0.05f, 0.08f, 0.12f, 0.88f);
+        rootImage.color = new Color(0.05f, 0.08f, 0.12f, 0.92f);
 
-        CreateLabel("Title", "ABRAZO COMPETITIVO", new Vector2(0.5f, 0.78f), 52, TextAnchor.MiddleCenter, Color.white);
-        CreateLabel("Subtitle", "Empuja, abraza, salta y no te caigas.", new Vector2(0.5f, 0.7f), 24, TextAnchor.MiddleCenter, new Color(0.86f, 0.91f, 0.97f));
-        CreateLabel("Controls", BuildControlsText(), new Vector2(0.5f, 0.52f), 24, TextAnchor.MiddleCenter, new Color(0.93f, 0.93f, 0.93f));
-        footerText = CreateLabel("Footer", "Listo para jugar", new Vector2(0.5f, 0.26f), 22, TextAnchor.MiddleCenter, new Color(1f, 0.85f, 0.45f));
-
-        CreateButton("PlayButton", "Jugar", new Vector2(0.42f, 0.14f), new Vector2(240f, 72f), OnPlayPressed);
-        CreateButton("ExitButton", "Salir", new Vector2(0.58f, 0.14f), new Vector2(240f, 72f), OnExitPressed);
+        float y = 280f;
+        CreateLabel("Title", "ABRAZO COMPETITIVO", new Vector2(0.5f, 0.5f), new Vector2(700f, 90f), new Vector2(0f, y), 60, TextAnchor.MiddleCenter, Color.white);
+        y -= 85f;
+        CreateLabel("Subtitle", "Empuja, abraza, salta y no te caigas.", new Vector2(0.5f, 0.5f), new Vector2(700f, 50f), new Vector2(0f, y), 26, TextAnchor.MiddleCenter, new Color(0.86f, 0.91f, 0.97f));
+        y -= 130f;
+        CreateLabel("Controls", BuildControlsText(), new Vector2(0.5f, 0.5f), new Vector2(700f, 180f), new Vector2(0f, y), 22, TextAnchor.MiddleCenter, new Color(0.93f, 0.93f, 0.93f));
+        y -= 140f;
+        footerText = CreateLabel("Footer", "Listo para jugar", new Vector2(0.5f, 0.5f), new Vector2(700f, 50f), new Vector2(0f, y), 24, TextAnchor.MiddleCenter, new Color(1f, 0.85f, 0.45f));
+        y -= 95f;
+        CreateButton("PlayButton", "Jugar", new Vector2(0.25f, 0.5f), new Vector2(260f, 80f), new Vector2(0f, y), OnPlayPressed);
+        CreateButton("ExitButton", "Salir", new Vector2(0.75f, 0.5f), new Vector2(260f, 80f), new Vector2(0f, y), OnExitPressed);
     }
 
-    private Text CreateLabel(string objectName, string content, Vector2 anchor, int fontSize, TextAnchor alignment, Color color)
+    private Text CreateLabel(string objectName, string content, Vector2 anchor, Vector2 size, Vector2 anchoredPosition, int fontSize, TextAnchor alignment, Color color)
     {
         GameObject labelObject = new GameObject(objectName, typeof(RectTransform), typeof(Text));
         labelObject.transform.SetParent(menuRoot.transform, false);
@@ -192,7 +222,8 @@ public class AC_MainMenuUI : MonoBehaviour
         rectTransform.anchorMin = anchor;
         rectTransform.anchorMax = anchor;
         rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        rectTransform.sizeDelta = new Vector2(1100f, fontSize * 4f);
+        rectTransform.sizeDelta = size;
+        rectTransform.anchoredPosition = anchoredPosition;
 
         Text label = labelObject.GetComponent<Text>();
         label.font = uiFont;
@@ -203,10 +234,12 @@ public class AC_MainMenuUI : MonoBehaviour
         label.horizontalOverflow = HorizontalWrapMode.Wrap;
         label.verticalOverflow = VerticalWrapMode.Overflow;
         label.text = content;
+
+        AddShadow(labelObject);
         return label;
     }
 
-    private void CreateButton(string objectName, string content, Vector2 anchor, Vector2 size, UnityEngine.Events.UnityAction callback)
+    private void CreateButton(string objectName, string content, Vector2 anchor, Vector2 size, Vector2 anchoredPosition, UnityEngine.Events.UnityAction callback)
     {
         GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
         buttonObject.transform.SetParent(menuRoot.transform, false);
@@ -216,6 +249,7 @@ public class AC_MainMenuUI : MonoBehaviour
         rectTransform.anchorMax = anchor;
         rectTransform.pivot = new Vector2(0.5f, 0.5f);
         rectTransform.sizeDelta = size;
+        rectTransform.anchoredPosition = anchoredPosition;
 
         Image image = buttonObject.GetComponent<Image>();
         image.color = new Color(0.16f, 0.33f, 0.46f, 1f);
@@ -228,6 +262,7 @@ public class AC_MainMenuUI : MonoBehaviour
         colors.pressedColor = new Color(0.12f, 0.25f, 0.35f, 1f);
         colors.selectedColor = colors.highlightedColor;
         button.colors = colors;
+        button.onClick.RemoveAllListeners();
         button.onClick.AddListener(callback);
 
         GameObject textObject = new GameObject("Text", typeof(RectTransform), typeof(Text));
@@ -241,16 +276,56 @@ public class AC_MainMenuUI : MonoBehaviour
 
         Text text = textObject.GetComponent<Text>();
         text.font = uiFont;
-        text.fontSize = 28;
+        text.fontSize = 32;
         text.alignment = TextAnchor.MiddleCenter;
         text.color = Color.white;
         text.text = content;
+
+        AddShadow(textObject);
+    }
+
+    private void EnsureCountdownText()
+    {
+        if (countdownText != null) return;
+        if (canvas == null) EnsureCanvas();
+
+        GameObject go = new GameObject("CountdownText", typeof(RectTransform), typeof(Text));
+        go.transform.SetParent(canvas.transform, false);
+
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = Vector2.zero;
+        rt.sizeDelta = new Vector2(400f, 400f);
+
+        Text t = go.GetComponent<Text>();
+        t.font = uiFont;
+        t.fontSize = 180;
+        t.alignment = TextAnchor.MiddleCenter;
+        t.color = Color.white;
+        t.text = "";
+
+        AddShadow(go);
+        go.SetActive(false);
+        countdownText = t;
+    }
+
+    private void AddShadow(GameObject target)
+    {
+        Shadow shadow = target.GetComponent<Shadow>();
+        if (shadow == null)
+        {
+            shadow = target.AddComponent<Shadow>();
+        }
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.7f);
+        shadow.effectDistance = new Vector2(2f, -2f);
     }
 
     private string BuildControlsText()
     {
         return "P1  WASD mover | Q saltar | Space abrazo | Shift dash | Ctrl bloqueo\n" +
-               "P2  Flechas mover | Keypad0 saltar | Enter abrazo | Right Shift dash | Right Ctrl bloqueo\n" +
+               "P2  Flechas mover | End saltar | Enter abrazo | Right Shift dash | Right Ctrl bloqueo\n" +
                "Caerse del mapa resta 1 punto y te devuelve al spawn.";
     }
 
@@ -264,6 +339,10 @@ public class AC_MainMenuUI : MonoBehaviour
 
     private void OnExitPressed()
     {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
         Application.Quit();
+#endif
     }
 }

@@ -1,17 +1,10 @@
 using UnityEngine;
-using System.Collections;
 
-[RequireComponent(typeof(CharacterController))]
 public class AC_PlayerController : MonoBehaviour
 {
-    [Header("Identidad")]
     public int playerId = 1;
     public string displayName = "Jugador 1";
 
-    [Header("Configuración (opcional — pisa los defaults)")]
-    public AC_PlayerConfig config;
-
-    [Header("Teclas")]
     public KeyCode upKey = KeyCode.W;
     public KeyCode downKey = KeyCode.S;
     public KeyCode leftKey = KeyCode.A;
@@ -23,8 +16,8 @@ public class AC_PlayerController : MonoBehaviour
     public KeyCode holdKey = KeyCode.LeftControl;
     public KeyCode alternateHoldKey = KeyCode.None;
     public KeyCode jumpKey = KeyCode.Q;
+    public KeyCode alternateJumpKey = KeyCode.None;
 
-    [Header("Movimiento")]
     public float moveSpeed = 5.5f;
     public float rotationSpeed = 12f;
     public bool tankControls = true;
@@ -32,26 +25,26 @@ public class AC_PlayerController : MonoBehaviour
     public float gravity = -25f;
     public float fallY = -4f;
 
-    [Header("Camara")]
     public bool moveRelativeToCamera = true;
     public Transform movementCamera;
 
-    [Header("Salto")]
     public float jumpForce = 8f;
     public float groundCheckDistance = 0.15f;
     public float groundCheckRadius = 0.25f;
-    public LayerMask groundMask = ~0;
+    public float fallMultiplier = 2.5f;
+    public LayerMask groundMask;
+    public Transform groundCheck;
 
-    [Header("Dash")]
     public float dashDistance = 3f;
     public float dashDuration = 0.14f;
     public float dashCooldown = 4f;
 
-    [Header("Bloqueo")]
     public float holdRadius = 0.18f;
     public float holdHeightMultiplier = 0.75f;
-    public Renderer[] bodyRenderers;
-    public Color blockingColor = new Color(1f, 0.84f, 0.35f, 1f);
+    public Vector3 blockModelOffset = Vector3.zero;
+
+    public bool enableAnimator = true;
+    public bool syncRotationWithCamera = false;
 
     private CharacterController controller;
     private AC_HugDetector hugDetector;
@@ -60,37 +53,39 @@ public class AC_PlayerController : MonoBehaviour
     private AC_Spawner spawnerHelper;
     private Animator animator;
     private Transform modelTransform;
-    private Coroutine hugRoutine;
-
-    [Header("Animación")]
-    public bool enableAnimator = true;
-    public float hugSquashIntensity = 0.3f;
-    public float hugSquashDuration = 0.4f;
 
     private float normalRadius;
     private float normalHeight;
     private Vector3 normalCenter;
+    private Vector3 normalModelLocalPosition;
     private Vector3 verticalVelocity;
     private Vector3 dashVelocity;
     private float dashTimer;
-    private float dashCooldownTimer;
     private Vector3 impulseVelocity;
     private float impulseTimer;
     private Vector3 lastNonZeroInput = Vector3.forward;
     private float forwardInput;
     private float turnInput;
     private float lastRespawnTime = -999f;
-    private readonly float respawnProtectionDuration = 0.5f;
-    private Color[] originalColors;
+    private float respawnProtectionDuration = 0.5f;
+    private Quaternion targetAimRotation;
 
-    public bool IsBlocking { get; private set; }
-    public bool IsDashing => dashTimer > 0f;
-    public float LastDashTime { get; private set; } = -999f;
-    public float LastHugPressTime { get; private set; } = -999f;
-    public AC_HugDetector HugDetector => hugDetector;
-    public float DashCooldown => dashCooldown;
-    public float DashCooldownRemaining => Mathf.Max(0f, dashCooldown - (Time.time - LastDashTime));
-    public CharacterController CharacterController => controller;
+    public bool IsBlocking;
+    public bool IsDashing;
+    public float LastDashTime = -999f;
+    public float LastHugPressTime = -999f;
+    public float DashCooldownRemaining;
+    public bool IsDashReady;
+
+    public CharacterController CharacterController
+    {
+        get { return controller; }
+    }
+
+    public AC_HugDetector HugDetector
+    {
+        get { return hugDetector; }
+    }
 
     private void Awake()
     {
@@ -99,9 +94,30 @@ public class AC_PlayerController : MonoBehaviour
         rigidBody = GetComponent<Rigidbody>();
         fallbackCollider = GetComponent<CapsuleCollider>();
         spawnerHelper = GetComponent<AC_Spawner>();
-        animator = GetComponent<Animator>();
-        if (animator == null) animator = GetComponentInChildren<Animator>();
         modelTransform = transform.Find("Model");
+        animator = GetComponent<Animator>();
+        if (animator == null) animator = GetComponentInChildren<Animator>(true);
+        if (animator == null && modelTransform != null) animator = modelTransform.GetComponent<Animator>();
+
+        if (groundCheck == null)
+        {
+            groundCheck = transform.Find("GroundCheck");
+            if (groundCheck == null)
+            {
+                GameObject groundCheckGO = new GameObject("GroundCheck");
+                groundCheckGO.transform.SetParent(transform, false);
+                groundCheckGO.transform.localPosition = new Vector3(0f, -controller.height * 0.5f + controller.center.y, 0f);
+                groundCheck = groundCheckGO.transform;
+            }
+        }
+
+        controller.height = 5f;
+        controller.center = new Vector3(0f, -0.14f, 0f);
+        controller.radius = 0.45f;
+        controller.skinWidth = 0.08f;
+        controller.stepOffset = 0.3f;
+        controller.minMoveDistance = 0.001f;
+        controller.slopeLimit = 45f;
 
         if (spawnerHelper == null)
         {
@@ -111,21 +127,28 @@ public class AC_PlayerController : MonoBehaviour
         normalRadius = controller.radius;
         normalHeight = controller.height;
         normalCenter = controller.center;
+        if (modelTransform != null)
+        {
+            normalModelLocalPosition = modelTransform.localPosition;
+        }
 
         spawnerHelper.enabled = true;
         spawnerHelper.autoRespawnOnFall = false;
         spawnerHelper.posicionEjeY = fallY;
 
-        var navAgent = GetComponent<UnityEngine.AI.NavMeshAgent>();
-        if (navAgent != null)
+        if (rigidBody != null)
         {
-            navAgent.enabled = false;
+            rigidBody.isKinematic = true;
+            rigidBody.useGravity = false;
+            rigidBody.detectCollisions = false;
+        }
+
+        if (fallbackCollider != null)
+        {
+            fallbackCollider.enabled = false;
         }
 
         ConfigureDefaultBindings();
-        AplicarConfigSiExiste();
-        NormalizePhysicsComponents();
-        CacheBodyRenderers();
     }
 
     private void ConfigureDefaultBindings()
@@ -140,7 +163,7 @@ public class AC_PlayerController : MonoBehaviour
             if (alternateHugKey == KeyCode.None) alternateHugKey = KeyCode.KeypadEnter;
             if (dashKey == KeyCode.LeftShift) dashKey = KeyCode.RightShift;
             if (holdKey == KeyCode.LeftControl) holdKey = KeyCode.RightControl;
-            if (jumpKey == KeyCode.Q || jumpKey == KeyCode.None) jumpKey = KeyCode.Keypad0;
+            if (jumpKey == KeyCode.Q || jumpKey == KeyCode.None) jumpKey = KeyCode.End;
             displayName = "Jugador 2";
         }
         else
@@ -150,95 +173,9 @@ public class AC_PlayerController : MonoBehaviour
                 jumpKey = KeyCode.Q;
             }
         }
-    }
 
-    private void AplicarConfigSiExiste()
-    {
-        if (config == null) return;
-
-        displayName = config.nombreMostrado;
-
-        // Teclas
-        upKey = config.teclaArriba;
-        downKey = config.teclaAbajo;
-        leftKey = config.teclaIzquierda;
-        rightKey = config.teclaDerecha;
-        hugKey = config.teclaAbrazo;
-        dashKey = config.teclaDash;
-        holdKey = config.teclaAguantar;
-        jumpKey = config.teclaSaltar;
-
-        // Movimiento
-        moveSpeed = config.velocidadMovimiento;
-        rotationSpeed = config.velocidadRotacion;
-        gravity = config.gravedad;
-        fallY = config.caidaY;
-
-        // Salto
-        jumpForce = config.fuerzaSalto;
-        groundCheckDistance = config.distanciaCheckSuelo;
-        groundCheckRadius = config.radioCheckSuelo;
-
-        // Dash
-        dashDistance = config.distanciaDash;
-        dashDuration = config.duracionDash;
-        dashCooldown = config.enfriamientoDash;
-
-        // Aguantar
-        holdRadius = config.radioAguantar;
-        holdHeightMultiplier = config.multiplicadorAlturaAguantar;
-
-        Debug.Log("[AC_PlayerController] Config aplicada: " + displayName);
-    }
-
-    private void NormalizePhysicsComponents()
-    {
-        if (rigidBody != null)
-        {
-            rigidBody.isKinematic = true;
-            rigidBody.useGravity = false;
-            rigidBody.detectCollisions = false;
-        }
-
-        if (fallbackCollider != null)
-        {
-            fallbackCollider.enabled = false;
-        }
-    }
-
-    private void CacheBodyRenderers()
-    {
-        if (bodyRenderers == null || bodyRenderers.Length == 0)
-        {
-            bodyRenderers = GetComponentsInChildren<Renderer>();
-        }
-
-        originalColors = new Color[bodyRenderers.Length];
-        for (int i = 0; i < bodyRenderers.Length; i++)
-        {
-            if (bodyRenderers[i] != null && bodyRenderers[i].material != null)
-            {
-                originalColors[i] = bodyRenderers[i].material.color;
-            }
-        }
-    }
-
-    public void SyncControllerSettingsFrom(AC_PlayerController source)
-    {
-        if (source == null || source.controller == null || controller == null || source == this)
-        {
-            return;
-        }
-
-        controller.height = source.controller.height;
-        controller.radius = source.controller.radius;
-        controller.center = source.controller.center;
-        controller.stepOffset = Mathf.Max(0f, source.controller.stepOffset);
-        controller.minMoveDistance = Mathf.Max(0f, source.controller.minMoveDistance);
-
-        normalHeight = controller.height;
-        normalRadius = controller.radius;
-        normalCenter = controller.center;
+        tankControls = false;
+        moveRelativeToCamera = true;
     }
 
     public void SetRespawnPoint(Transform point)
@@ -249,8 +186,26 @@ public class AC_PlayerController : MonoBehaviour
         }
     }
 
+    public void SetAimRotation(Quaternion rotation)
+    {
+        targetAimRotation = rotation;
+        syncRotationWithCamera = true;
+    }
+
+    public void ClearAimRotation()
+    {
+        syncRotationWithCamera = false;
+    }
+
     private void Update()
     {
+        if (groundCheck != null)
+        {
+            Vector3 localPos = groundCheck.localPosition;
+            localPos.y = -controller.height * 0.5f + controller.center.y;
+            groundCheck.localPosition = localPos;
+        }
+
         if (AC_GameManager.Instance != null && !AC_GameManager.Instance.IsRoundActive)
         {
             RestoreNormalCollider();
@@ -265,27 +220,49 @@ public class AC_PlayerController : MonoBehaviour
         {
             LastHugPressTime = Time.time;
             hugDetector.StartHug();
-            if (enableAnimator && modelTransform != null)
+            if (enableAnimator && animator != null)
             {
-                if (hugRoutine != null) StopCoroutine(hugRoutine);
-                hugRoutine = StartCoroutine(HugSquashEffect());
+                animator.SetTrigger("Hug");
             }
         }
 
-        dashCooldownTimer -= Time.deltaTime;
-        if (CanTryDash() && IsActionPressed(dashKey, alternateDashKey) && dashCooldownTimer <= 0f)
+        UpdateDashReady();
+        if (CanTryDash() && IsActionPressed(dashKey, alternateDashKey) && IsDashReady)
         {
             StartDash(input);
+            if (enableAnimator && animator != null)
+            {
+                animator.SetTrigger("Dash");
+            }
         }
 
-        if (CanTryJump() && Input.GetKeyDown(jumpKey) && IsGrounded())
+        if (CanTryJump() && IsActionPressed(jumpKey, alternateJumpKey) && IsGrounded())
         {
             verticalVelocity.y = jumpForce;
+            if (enableAnimator && animator != null)
+            {
+                animator.SetTrigger("Jump");
+            }
         }
 
         MovePlayer(input);
         UpdateAnimatorParams();
         CheckFall();
+    }
+
+    private void UpdateDashReady()
+    {
+        float timeSinceLastDash = Time.time - LastDashTime;
+        if (timeSinceLastDash >= dashCooldown)
+        {
+            IsDashReady = true;
+            DashCooldownRemaining = 0f;
+        }
+        else
+        {
+            IsDashReady = false;
+            DashCooldownRemaining = dashCooldown - timeSinceLastDash;
+        }
     }
 
     private Vector3 ReadInputDirection()
@@ -297,12 +274,21 @@ public class AC_PlayerController : MonoBehaviour
         if (Input.GetKey(downKey)) z -= 1f;
         if (Input.GetKey(upKey)) z += 1f;
 
-        turnInput = Mathf.Clamp(x, -1f, 1f);
-        forwardInput = Mathf.Clamp(z, -1f, 1f);
+        turnInput = x;
+        if (turnInput > 1f) turnInput = 1f;
+        if (turnInput < -1f) turnInput = -1f;
+
+        forwardInput = z;
+        if (forwardInput > 1f) forwardInput = 1f;
+        if (forwardInput < -1f) forwardInput = -1f;
 
         if (tankControls)
         {
-            return Mathf.Abs(forwardInput) > 0.01f ? transform.forward * forwardInput : Vector3.zero;
+            if (Mathf.Abs(forwardInput) > 0.01f)
+            {
+                return transform.forward * forwardInput;
+            }
+            return Vector3.zero;
         }
 
         Vector3 direction = new Vector3(x, 0f, z);
@@ -348,7 +334,12 @@ public class AC_PlayerController : MonoBehaviour
         }
 
         Camera mainCamera = Camera.main;
-        return mainCamera != null ? mainCamera.transform : null;
+        if (mainCamera != null)
+        {
+            return mainCamera.transform;
+        }
+
+        return null;
     }
 
     private void MovePlayer(Vector3 input)
@@ -363,7 +354,15 @@ public class AC_PlayerController : MonoBehaviour
                 transform.Rotate(Vector3.up, turnInput * turnSpeedDegrees * Time.deltaTime, Space.World);
             }
 
-            movementInput = Mathf.Abs(forwardInput) > 0.01f ? transform.forward * forwardInput : Vector3.zero;
+            if (Mathf.Abs(forwardInput) > 0.01f)
+            {
+                movementInput = transform.forward * forwardInput;
+            }
+            else
+            {
+                movementInput = Vector3.zero;
+            }
+
             if (movementInput.sqrMagnitude > 0.01f)
             {
                 lastNonZeroInput = movementInput.normalized;
@@ -378,8 +377,16 @@ public class AC_PlayerController : MonoBehaviour
         if (!tankControls && movementInput.sqrMagnitude > 0.01f && !IsBlocking)
         {
             Quaternion targetRotation = Quaternion.LookRotation(movementInput, Vector3.up);
-            float maxDegreesDelta = Mathf.Max(90f, rotationSpeed * 90f) * Time.deltaTime;
-            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, maxDegreesDelta);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
+        }
+        else if (syncRotationWithCamera && !IsBlocking)
+        {
+            float maxDegreesDelta = rotationSpeed * 90f * Time.deltaTime;
+            if (maxDegreesDelta < 90f)
+            {
+                maxDegreesDelta = 90f;
+            }
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetAimRotation, maxDegreesDelta);
         }
 
         if (dashTimer > 0f)
@@ -388,7 +395,9 @@ public class AC_PlayerController : MonoBehaviour
             dashTimer -= Time.deltaTime;
             if (dashTimer <= 0f)
             {
+                dashTimer = 0f;
                 dashVelocity = Vector3.zero;
+                IsDashing = false;
             }
         }
 
@@ -398,37 +407,54 @@ public class AC_PlayerController : MonoBehaviour
             impulseTimer -= Time.deltaTime;
             if (impulseTimer <= 0f)
             {
+                impulseTimer = 0f;
                 impulseVelocity = Vector3.zero;
             }
         }
 
-        if (AC_GameManager.Instance != null)
-        {
-            horizontal += AC_GameManager.Instance.CurrentWindVelocity;
-        }
-
-        if (IsGrounded() && verticalVelocity.y < 0f)
+        bool grounded = IsGrounded();
+        if (grounded && verticalVelocity.y < 0f)
         {
             verticalVelocity.y = -2f;
         }
 
-        verticalVelocity.y += gravity * Time.deltaTime;
+        float effectiveGravity = gravity;
+        if (!grounded && verticalVelocity.y < 0f)
+        {
+            effectiveGravity = gravity * fallMultiplier;
+        }
+
+        verticalVelocity.y += effectiveGravity * Time.deltaTime;
         Vector3 motion = (horizontal + verticalVelocity) * Time.deltaTime;
         controller.Move(motion);
     }
 
     private void StartDash(Vector3 input)
     {
-        Vector3 dashDirection = input.sqrMagnitude > 0.01f ? input.normalized : lastNonZeroInput;
+        Vector3 dashDirection;
+        if (input.sqrMagnitude > 0.01f)
+        {
+            dashDirection = input.normalized;
+        }
+        else
+        {
+            dashDirection = lastNonZeroInput;
+        }
+
         if (dashDirection.sqrMagnitude < 0.01f)
         {
             dashDirection = transform.forward;
         }
 
-        float dashSpeed = dashDistance / Mathf.Max(0.01f, dashDuration);
+        float dashSpeed = dashDistance / dashDuration;
+        if (dashDuration < 0.01f)
+        {
+            dashSpeed = dashDistance / 0.01f;
+        }
+
         dashVelocity = dashDirection * dashSpeed;
         dashTimer = dashDuration;
-        dashCooldownTimer = dashCooldown;
+        IsDashing = true;
         LastDashTime = Time.time;
     }
 
@@ -440,36 +466,81 @@ public class AC_PlayerController : MonoBehaviour
 
     private void SetBlocking(bool value)
     {
+        if (IsBlocking == value) return;
         IsBlocking = value;
+
         if (value)
         {
             controller.radius = holdRadius;
-            controller.height = normalHeight * holdHeightMultiplier;
-            controller.center = new Vector3(normalCenter.x, controller.height * 0.5f, normalCenter.z);
-            SetRendererColors(blockingColor);
+            float newHeight = normalHeight * holdHeightMultiplier;
+            float heightDelta = normalHeight - newHeight;
+            controller.height = newHeight;
+            controller.center = normalCenter - Vector3.up * (heightDelta * 0.5f);
+
+            ApplyBlockModelOffset(true);
         }
         else
         {
             RestoreNormalCollider();
+            ApplyBlockModelOffset(false);
         }
+    }
+
+    private void ApplyBlockModelOffset(bool enable)
+    {
+        if (modelTransform == null) return;
+
+        Vector3 target;
+        if (enable)
+        {
+            target = normalModelLocalPosition + blockModelOffset;
+        }
+        else
+        {
+            target = normalModelLocalPosition;
+        }
+
+        modelTransform.localPosition = target;
     }
 
     private void RestoreNormalCollider()
     {
         IsBlocking = false;
+        if (controller == null) return;
         controller.radius = normalRadius;
         controller.height = normalHeight;
         controller.center = normalCenter;
-        RestoreRendererColors();
     }
 
     private bool IsGrounded()
     {
-        Vector3 origin = transform.position + controller.center;
-        float radius = controller.radius * groundCheckRadius;
-        float distance = (controller.height * 0.5f) - controller.radius + groundCheckDistance;
+        if (controller == null) return false;
 
-        if (Physics.SphereCast(origin, radius, Vector3.down, out RaycastHit hit, distance, groundMask, QueryTriggerInteraction.Ignore))
+        Vector3 origin;
+        float radius = controller.radius * groundCheckRadius;
+        float distance;
+
+        if (groundCheck != null)
+        {
+            origin = groundCheck.position;
+            distance = groundCheckDistance;
+            if (distance < 0.05f)
+            {
+                distance = 0.05f;
+            }
+        }
+        else
+        {
+            origin = transform.position + controller.center;
+            distance = (controller.height * 0.5f) - controller.radius + groundCheckDistance;
+        }
+
+        if (Physics.SphereCast(origin, radius, Vector3.down, out RaycastHit sphereHit, distance, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            return true;
+        }
+
+        if (Physics.Raycast(origin, Vector3.down, out RaycastHit rayHit, distance + radius, groundMask, QueryTriggerInteraction.Ignore))
         {
             return true;
         }
@@ -489,14 +560,15 @@ public class AC_PlayerController : MonoBehaviour
             return;
         }
 
+        Vector3 footPosition = groundCheck != null ? groundCheck.position : transform.position;
+
         Transform center = AC_GameManager.Instance.arenaCenter;
         Vector3 centerPosition = center != null ? center.position : Vector3.zero;
-        Vector3 flatPlayer = new Vector3(transform.position.x, 0f, transform.position.z);
+        Vector3 flatPlayer = new Vector3(footPosition.x, 0f, footPosition.z);
         Vector3 flatCenter = new Vector3(centerPosition.x, 0f, centerPosition.z);
         float distance = Vector3.Distance(flatPlayer, flatCenter);
 
-        bool fellByHeight = transform.position.y < fallY;
-        // 0.05f de margen mínimo — el jugador cae apenas sale del borde visual
+        bool fellByHeight = footPosition.y < fallY;
         bool fellByDistance = distance > AC_GameManager.Instance.CurrentArenaRadius + 0.05f;
         if (fellByHeight || fellByDistance)
         {
@@ -510,7 +582,11 @@ public class AC_PlayerController : MonoBehaviour
         impulseTimer = 0f;
         dashVelocity = Vector3.zero;
         impulseVelocity = Vector3.zero;
-        hugDetector?.CancelHug();
+        IsDashing = false;
+        if (hugDetector != null)
+        {
+            hugDetector.CancelHug();
+        }
     }
 
     public void CancelAllActions()
@@ -557,7 +633,11 @@ public class AC_PlayerController : MonoBehaviour
             Vector3 center = centerTransform.position;
             Vector3 flatCenter = new Vector3(center.x, 0f, center.z);
             Vector3 flatPosition = new Vector3(position.x, 0f, position.z);
-            float maxRadius = Mathf.Max(0.5f, AC_GameManager.Instance.CurrentArenaRadius - 0.75f);
+            float maxRadius = AC_GameManager.Instance.CurrentArenaRadius - 0.75f;
+            if (maxRadius < 0.5f)
+            {
+                maxRadius = 0.5f;
+            }
 
             if (Vector3.Distance(flatPosition, flatCenter) > maxRadius)
             {
@@ -568,7 +648,10 @@ public class AC_PlayerController : MonoBehaviour
             }
         }
 
-        position.y = Mathf.Max(position.y, fallY + 1f);
+        if (position.y < fallY + 1f)
+        {
+            position.y = fallY + 1f;
+        }
     }
 
     private bool HasMovementInput()
@@ -588,94 +671,55 @@ public class AC_PlayerController : MonoBehaviour
 
     private bool CanTryJump()
     {
-        return jumpKey != KeyCode.None && !IsBlocking;
+        return (jumpKey != KeyCode.None || alternateJumpKey != KeyCode.None) && !IsBlocking;
     }
 
     private bool IsActionPressed(KeyCode primary, KeyCode secondary)
     {
-        return (primary != KeyCode.None && Input.GetKeyDown(primary)) ||
-               (secondary != KeyCode.None && Input.GetKeyDown(secondary));
+        if (primary != KeyCode.None && Input.GetKeyDown(primary))
+        {
+            return true;
+        }
+        if (secondary != KeyCode.None && Input.GetKeyDown(secondary))
+        {
+            return true;
+        }
+        return false;
     }
 
     private bool IsActionHeld(KeyCode primary, KeyCode secondary)
     {
-        return (primary != KeyCode.None && Input.GetKey(primary)) ||
-               (secondary != KeyCode.None && Input.GetKey(secondary));
+        if (primary != KeyCode.None && Input.GetKey(primary))
+        {
+            return true;
+        }
+        if (secondary != KeyCode.None && Input.GetKey(secondary))
+        {
+            return true;
+        }
+        return false;
     }
 
-    private void SetRendererColors(Color targetColor)
+    private void ResolveAnimator()
     {
-        for (int i = 0; i < bodyRenderers.Length; i++)
-        {
-            if (bodyRenderers[i] != null && bodyRenderers[i].material != null)
-            {
-                bodyRenderers[i].material.color = targetColor;
-            }
-        }
-    }
-
-    private void RestoreRendererColors()
-    {
-        if (originalColors == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < bodyRenderers.Length && i < originalColors.Length; i++)
-        {
-            if (bodyRenderers[i] != null && bodyRenderers[i].material != null)
-            {
-                bodyRenderers[i].material.color = originalColors[i];
-            }
-        }
+        if (animator != null) return;
+        animator = GetComponent<Animator>();
+        if (animator == null) animator = GetComponentInChildren<Animator>(true);
+        if (animator == null && modelTransform != null) animator = modelTransform.GetComponent<Animator>();
     }
 
     private void UpdateAnimatorParams()
     {
-        if (!enableAnimator || animator == null) return;
+        if (!enableAnimator) return;
+        ResolveAnimator();
+        if (animator == null) return;
 
         float speed = controller.velocity.magnitude / moveSpeed;
-        speed = Mathf.Clamp01(speed);
+        if (speed > 1f) speed = 1f;
+        if (speed < 0f) speed = 0f;
         animator.SetFloat("Speed", speed);
 
-        bool isJumping = !IsGrounded() && verticalVelocity.y > 0f;
-        animator.SetFloat("IsJumping", isJumping ? 1f : 0f);
-
-        animator.SetFloat("IsGrounded", IsGrounded() ? 1f : 0f);
-    }
-
-    private System.Collections.IEnumerator HugSquashEffect()
-    {
-        Vector3 originalScale = modelTransform.localScale;
-        float halfDuration = hugSquashDuration * 0.5f;
-        float elapsed = 0f;
-
-        // Squash down (scale Y down, X/Z up)
-        while (elapsed < halfDuration)
-        {
-            float t = elapsed / halfDuration;
-            float sx = Mathf.Lerp(1f, 1f + hugSquashIntensity, t);
-            float sy = Mathf.Lerp(1f, 1f - hugSquashIntensity, t);
-            float sz = Mathf.Lerp(1f, 1f + hugSquashIntensity, t);
-            modelTransform.localScale = new Vector3(originalScale.x * sx, originalScale.y * sy, originalScale.z * sz);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        // Stretch back
-        elapsed = 0f;
-        while (elapsed < halfDuration)
-        {
-            float t = elapsed / halfDuration;
-            float sx = Mathf.Lerp(1f + hugSquashIntensity, 1f, t);
-            float sy = Mathf.Lerp(1f - hugSquashIntensity, 1f, t);
-            float sz = Mathf.Lerp(1f + hugSquashIntensity, 1f, t);
-            modelTransform.localScale = new Vector3(originalScale.x * sx, originalScale.y * sy, originalScale.z * sz);
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        modelTransform.localScale = originalScale;
-        hugRoutine = null;
+        animator.SetBool("Grounded", IsGrounded());
+        animator.SetBool("Blocking", IsBlocking);
     }
 }

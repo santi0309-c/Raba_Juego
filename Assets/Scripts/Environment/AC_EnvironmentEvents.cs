@@ -11,7 +11,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
         NieblaBaja
     }
 
-    [Header("Evento Ãºnico por partida")]
     public int minRound = 2;
     public int maxRound = 4;
     public float minDelayInsideRound = 8f;
@@ -19,18 +18,14 @@ public class AC_EnvironmentEvents : MonoBehaviour
     public float minDuration = 15f;
     public float maxDuration = 25f;
 
-    [Header("Viento")]
     public float windStrength = 3f;
 
-    [Header("Arena se achica")]
     public Transform arenaVisual;
     public float shrinkFactor = 0.5f;
 
-    [Header("Piso inclinado")]
     public float tiltAngle = 20f;
     public float tiltSmoothSpeed = 2f;
 
-    [Header("Niebla baja")]
     public float fogDensity = 0.15f;
     public Color fogColor = new Color(0.7f, 0.7f, 0.75f, 1f);
 
@@ -39,7 +34,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
     private Vector3 originalArenaScale;
     private Quaternion originalArenaRotation;
 
-    // Estado original de niebla
     private bool originalFogEnabled;
     private float originalFogDensity;
     private Color originalFogColor;
@@ -81,7 +75,15 @@ public class AC_EnvironmentEvents : MonoBehaviour
 
     public void BeginMatch()
     {
-        chosenRound = Random.Range(minRound, maxRound + 1);
+        int min = minRound;
+        int max = maxRound;
+        if (min > max)
+        {
+            int temp = min;
+            min = max;
+            max = temp;
+        }
+        chosenRound = Random.Range(min, max + 1);
         eventUsed = false;
 
         if (arenaVisual != null)
@@ -90,7 +92,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
             originalArenaRotation = arenaVisual.localRotation;
         }
 
-        // Guardar estado original de niebla
         originalFogEnabled = RenderSettings.fog;
         originalFogDensity = RenderSettings.fogDensity;
         originalFogColor = RenderSettings.fogColor;
@@ -133,7 +134,16 @@ public class AC_EnvironmentEvents : MonoBehaviour
     {
         if (AC_GameManager.Instance == null) yield break;
 
-        Vector3 dir = Random.value < 0.5f ? Vector3.right : Vector3.left;
+        Vector3 dir;
+        if (Random.value < 0.5f)
+        {
+            dir = Vector3.right;
+        }
+        else
+        {
+            dir = Vector3.left;
+        }
+
         AC_GameManager.Instance.CurrentWindVelocity = dir * windStrength;
         AC_GameManager.Instance.SetEventLabel("Evento: Viento lateral");
         Debug.Log("EVENTO: Viento lateral");
@@ -167,11 +177,13 @@ public class AC_EnvironmentEvents : MonoBehaviour
 
         AC_GameManager.Instance.ResetArenaRadius();
         AC_GameManager.Instance.SetEventLabel(string.Empty);
-        if (arenaVisual != null) arenaVisual.localScale = originalArenaScale;
+        if (arenaVisual != null)
+        {
+            arenaVisual.localScale = originalArenaScale;
+        }
         Debug.Log("FIN EVENTO: La arena se achica");
     }
 
-    // FIX #5: Piso inclinado â€” rota 20Â° la arena durante el evento
     private IEnumerator TiltEvent(float duration)
     {
         if (arenaVisual == null) yield break;
@@ -182,26 +194,33 @@ public class AC_EnvironmentEvents : MonoBehaviour
             AC_GameManager.Instance.SetEventLabel("Evento: Piso inclinado");
         }
 
-        // Elegir una direcciÃ³n aleatoria para la inclinaciÃ³n
-        Vector3 tiltAxis = Random.value < 0.5f ? Vector3.forward : Vector3.right;
+        Vector3 tiltAxis;
+        if (Random.value < 0.5f)
+        {
+            tiltAxis = Vector3.forward;
+        }
+        else
+        {
+            tiltAxis = Vector3.right;
+        }
         Quaternion targetRotation = originalArenaRotation * Quaternion.AngleAxis(tiltAngle, tiltAxis);
 
         float elapsed = 0f;
+        float enterDuration = 2f;
         while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
 
-            // Entrada suave: lerp hacia la inclinaciÃ³n
             if (arenaVisual != null)
             {
-                float t = Mathf.Clamp01(elapsed / 2f); // 2 segundos para entrar
-                arenaVisual.localRotation = Quaternion.Slerp(arenaVisual.localRotation, targetRotation, Time.deltaTime * tiltSmoothSpeed);
+                float t = elapsed / enterDuration;
+                if (t > 1f) t = 1f;
+                arenaVisual.localRotation = Quaternion.Slerp(originalArenaRotation, targetRotation, t);
             }
 
             yield return null;
         }
 
-        // Restaurar rotaciÃ³n original suavemente
         float restoreTimer = 0f;
         while (restoreTimer < 2f && arenaVisual != null)
         {
@@ -210,7 +229,10 @@ public class AC_EnvironmentEvents : MonoBehaviour
             yield return null;
         }
 
-        if (arenaVisual != null) arenaVisual.localRotation = originalArenaRotation;
+        if (arenaVisual != null)
+        {
+            arenaVisual.localRotation = originalArenaRotation;
+        }
         if (AC_GameManager.Instance != null)
         {
             AC_GameManager.Instance.SetEventLabel(string.Empty);
@@ -218,7 +240,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
         Debug.Log("FIN EVENTO: El piso se inclina");
     }
 
-    // FIX #5: Niebla baja â€” reduce visibilidad drÃ¡sticamente durante el evento
     private IEnumerator FogEvent(float duration)
     {
         Debug.Log("EVENTO: Niebla baja");
@@ -234,7 +255,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
 
         yield return new WaitForSeconds(duration);
 
-        // Restaurar estado original de niebla
         RenderSettings.fog = originalFogEnabled;
         RenderSettings.fogDensity = originalFogDensity;
         RenderSettings.fogColor = originalFogColor;

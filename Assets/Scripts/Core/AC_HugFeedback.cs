@@ -1,28 +1,22 @@
 using System.Collections;
 using UnityEngine;
 
-/// <summary>
-/// Feedback visual para abrazos: shake de cámara, flash de color, partículas.
-/// </summary>
 public class AC_HugFeedback : MonoBehaviour
 {
-    [Header("Shake de cámara")]
     public float duracionShake = 0.25f;
     public float fuerzaShake = 0.4f;
 
-    [Header("Flash de color")]
     public float duracionFlash = 0.12f;
     public Color colorExito = Color.green;
     public Color colorFallo = Color.red;
 
-    [Header("Partículas (opcional)")]
     public GameObject prefabParticulas;
 
     public void AbrazoExitoso(AC_PlayerController atacante, AC_PlayerController objetivo)
     {
         StartCoroutine(ShakeCamara());
         StartCoroutine(FlashRenderers(atacante, colorExito));
-        StartCoroutine(FlashRenderers(objetivo, colorFallo));
+        StartCoroutine(FlashRenderers(objetivo, colorExito));
         SpawnParticulas(atacante, objetivo);
     }
 
@@ -54,13 +48,16 @@ public class AC_HugFeedback : MonoBehaviour
     {
         Renderer r = null;
         if (jugador != null)
+        {
             r = jugador.GetComponentInChildren<Renderer>();
+        }
         else
         {
-            // Buscar cualquier jugador en escena
             AC_PlayerController[] jugadores = FindObjectsByType<AC_PlayerController>(FindObjectsSortMode.None);
             if (jugadores.Length > 0)
+            {
                 r = jugadores[0].GetComponentInChildren<Renderer>();
+            }
         }
 
         if (r == null) yield break;

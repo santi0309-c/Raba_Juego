@@ -10,12 +10,15 @@ public class AC_SceneDecorator : MonoBehaviour
     private TextMesh player2Sign;
     private TextMesh centerSign;
 
+    private Camera mainCamera;
+
     public void Configure(AC_GameManager manager, Transform firstSpawn, Transform secondSpawn, Transform center)
     {
         gameManager = manager;
         spawn1 = firstSpawn;
         spawn2 = secondSpawn;
         arenaCenter = center;
+        mainCamera = Camera.main;
         EnsureSigns();
         RefreshStaticSigns();
     }
@@ -27,7 +30,6 @@ public class AC_SceneDecorator : MonoBehaviour
             return;
         }
 
-        EnsureSigns();
         RefreshDynamicSign();
         FaceCamera(player1Sign);
         FaceCamera(player2Sign);
@@ -103,12 +105,12 @@ public class AC_SceneDecorator : MonoBehaviour
 
     private void FaceCamera(TextMesh sign)
     {
-        if (sign == null || Camera.main == null)
+        if (sign == null || mainCamera == null)
         {
             return;
         }
 
-        Vector3 direction = sign.transform.position - Camera.main.transform.position;
+        Vector3 direction = sign.transform.position - mainCamera.transform.position;
         if (direction.sqrMagnitude < 0.01f)
         {
             return;

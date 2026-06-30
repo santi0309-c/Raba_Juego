@@ -1,12 +1,9 @@
 using UnityEngine;
 
-[RequireComponent(typeof(CharacterController))]
 public class AC_Spawner : MonoBehaviour
 {
-    [Header("Respawn")]
     public Transform respawn;
     public float posicionEjeY = -20f;
-    [Header("Opcional: usa este script para auto-respawn fuera del mapa si no quieres manejarlo desde AC_GameManager.")]
     public bool autoRespawnOnFall;
 
     private CharacterController characterController;
@@ -24,7 +21,7 @@ public class AC_Spawner : MonoBehaviour
     {
         if (point == null)
         {
-            Debug.LogWarning("[AC_Spawner] SetRespawnPoint recibió null.");
+            Debug.LogWarning("[AC_Spawner] SetRespawnPoint recibio null.");
         }
 
         respawn = point;

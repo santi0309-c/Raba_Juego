@@ -1,36 +1,41 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>
-/// FIX #3: Posiciona automáticamente los carteles de UI usando anchors relativos.
-/// Agregar al Canvas. Asignar las referencias a los Text.
-/// No requiere configuración manual de RectTransform — este script ajusta todo en Awake.
-/// </summary>
 public class AC_UILayoutManager : MonoBehaviour
 {
-    [Header("Referencias UI")]
     public Text scoreText;
     public Text statusText;
     public Text dashTextP1;
     public Text dashTextP2;
 
-    [Header("Modo")]
-    [Tooltip("Activar si los textos ya están posicionados en un prefab.")]
     public bool usarPrefab = false;
 
-    [Header("Margen desde bordes (en píxeles)")]
     public float margin = 24f;
 
     public void AutoWire(Text currentStatusText, Text currentScoreText)
     {
         if (scoreText == null)
         {
-            scoreText = currentScoreText != null ? currentScoreText : FindText("ScoreText");
+            if (currentScoreText != null)
+            {
+                scoreText = currentScoreText;
+            }
+            else
+            {
+                scoreText = FindText("ScoreText");
+            }
         }
 
         if (statusText == null)
         {
-            statusText = currentStatusText != null ? currentStatusText : FindText("StatusText");
+            if (currentStatusText != null)
+            {
+                statusText = currentStatusText;
+            }
+            else
+            {
+                statusText = FindText("StatusText");
+            }
         }
 
         if (dashTextP1 == null)
@@ -55,7 +60,6 @@ public class AC_UILayoutManager : MonoBehaviour
     {
         if (usarPrefab)
         {
-            // Solo estilizar, no mover
             AplicarSoloEstilo(scoreText);
             AplicarSoloEstilo(statusText);
             AplicarSoloEstilo(dashTextP1);
@@ -67,10 +71,14 @@ public class AC_UILayoutManager : MonoBehaviour
         SetupTextElement(statusText, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -margin * 2f - 10f), TextAnchor.UpperCenter);
 
         if (dashTextP1 != null)
+        {
             SetupTextElement(dashTextP1, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(margin, margin), TextAnchor.LowerLeft);
+        }
 
         if (dashTextP2 != null)
+        {
             SetupTextElement(dashTextP2, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-margin, margin), TextAnchor.LowerRight);
+        }
     }
 
     private void AplicarSoloEstilo(Text text)
@@ -83,24 +91,24 @@ public class AC_UILayoutManager : MonoBehaviour
 
         Shadow shadow = text.gameObject.GetComponent<Shadow>();
         if (shadow == null)
+        {
             shadow = text.gameObject.AddComponent<Shadow>();
+        }
         shadow.effectColor = new Color(0f, 0f, 0f, 0.7f);
         shadow.effectDistance = new Vector2(1f, -1f);
     }
 
-    private void SetupTextElement(Text text, Vector2 anchorMin, Vector2 anchorMax, Vector2 anchoredPosition, TextAnchor alignment = TextAnchor.MiddleCenter)
+    private void SetupTextElement(Text text, Vector2 anchorMin, Vector2 anchorMax, Vector2 anchoredPosition, TextAnchor alignment)
     {
         if (text == null) return;
 
         RectTransform rt = text.rectTransform;
 
-        // Anclajes responsivos
         rt.anchorMin = anchorMin;
         rt.anchorMax = anchorMax;
         rt.pivot = new Vector2((anchorMin.x + anchorMax.x) * 0.5f, (anchorMin.y + anchorMax.y) * 0.5f);
         rt.anchoredPosition = anchoredPosition;
 
-        // Tamaño se ajusta al contenido
         ContentSizeFitter fitter = text.gameObject.GetComponent<ContentSizeFitter>();
         if (fitter == null)
         {
@@ -109,14 +117,12 @@ public class AC_UILayoutManager : MonoBehaviour
         fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Texto legible y con tamaño base
         text.fontSize = Mathf.Max(text.fontSize, 24);
         text.color = Color.white;
         text.alignment = alignment;
         text.horizontalOverflow = HorizontalWrapMode.Wrap;
         text.verticalOverflow = VerticalWrapMode.Overflow;
 
-        // Sombra para legibilidad sobre fondo
         Shadow shadow = text.gameObject.GetComponent<Shadow>();
         if (shadow == null)
         {
@@ -131,6 +137,10 @@ public class AC_UILayoutManager : MonoBehaviour
     private Text FindText(string objectName)
     {
         GameObject target = GameObject.Find(objectName);
-        return target != null ? target.GetComponent<Text>() : null;
+        if (target != null)
+        {
+            return target.GetComponent<Text>();
+        }
+        return null;
     }
 }
