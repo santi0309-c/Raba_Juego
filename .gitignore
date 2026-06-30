@@ -32,6 +32,10 @@ sysinfo.txt
 # Unity meta-generated caches
 Assets/AssetStoreTools*
 
+# Screenshots (nunca deben subirse)
+Assets/Screenshots/
+Assets/Screenshots.meta
+
 # OS/editor clutter
 Thumbs.db
 Desktop.ini
