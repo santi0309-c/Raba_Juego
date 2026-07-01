@@ -45,7 +45,7 @@ public class AC_ArenaManager : MonoBehaviour
         RadioActual = radioActual;
     }
 
-    public void ValidarReferenciaArena(AC_EnvironmentEvents environmentEvents, ref Transform centroArena)
+    public void ValidarReferenciaArena(ref Transform centroArena)
     {
         if (centroArena == null)
         {

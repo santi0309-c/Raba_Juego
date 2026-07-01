@@ -156,7 +156,7 @@ public class AC_HugDetector : MonoBehaviour
                 if (target != null && AC_GameManager.Instance != null)
                 {
                     alreadyHit = true;
-                    AC_GameManager.Instance.RegisterHugAttempt(owner, target, owner.LastHugPressTime);
+                    AC_GameManager.Instance.RegisterHugAttempt(owner, target);
                 }
             }
 

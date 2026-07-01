@@ -40,7 +40,6 @@ public class AC_GameManager : MonoBehaviour
 
     public int roundsToPlay = 5;
     public float lawReadSeconds = 0f;
-    public float countdownSeconds = 3f;
 
     public float chargedMaxSeconds = 3f;
     public float chargedBreakDistance = 1.6f;
@@ -148,16 +147,6 @@ public class AC_GameManager : MonoBehaviour
         startupCountdownRoutine = null;
     }
 
-    public void ReturnToMenu()
-    {
-        StopActiveCoroutines();
-        EndCurrentRound();
-        ResetMatchState();
-        ResetBothPlayers();
-        hud.ActualizarHUDEnPausa();
-        hud.MostrarMenu(true, "Pulsa Jugar para una nueva ronda");
-    }
-
     private IEnumerator RunMatchLoop()
     {
         PrepareMatchPresentation();
@@ -224,11 +213,11 @@ public class AC_GameManager : MonoBehaviour
         yield return new WaitForSeconds(1.25f);
     }
 
-    public void RegisterHugAttempt(AC_PlayerController attacker, AC_PlayerController target, float attemptTime)
+    public void RegisterHugAttempt(AC_PlayerController attacker, AC_PlayerController target)
     {
         if (hugResolver != null)
         {
-            hugResolver.Resolver(attacker, target, attemptTime);
+            hugResolver.Resolver(attacker, target);
         }
     }
 
@@ -488,7 +477,7 @@ public class AC_GameManager : MonoBehaviour
     {
         if (arenaManager != null)
         {
-            arenaManager.ValidarReferenciaArena(environmentEvents, ref arenaCenter);
+            arenaManager.ValidarReferenciaArena(ref arenaCenter);
         }
     }
 

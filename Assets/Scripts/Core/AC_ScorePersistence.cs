@@ -75,32 +75,6 @@ public class AC_ScorePersistence : MonoBehaviour
         return new List<AC_HighScoreEntry>();
     }
 
-    public void BorrarTodo()
-    {
-        PlayerPrefs.DeleteKey(CLAVE);
-        PlayerPrefs.Save();
-        Debug.Log("[AC_ScorePersistence] Ranking borrado.");
-    }
-
-    public string RankingATexto()
-    {
-        List<AC_HighScoreEntry> ranking = CargarTop();
-        if (ranking.Count == 0)
-        {
-            return "Sin puntajes todavia.";
-        }
-
-        string texto = "MEJORES PUNTAJES\n\n";
-        for (int i = 0; i < ranking.Count; i++)
-        {
-            texto += (i + 1) + ". " + ranking[i].nombreJugador
-                  + " - " + ranking[i].puntaje
-                  + " puntos (" + ranking[i].fecha + ")\n";
-        }
-
-        return texto;
-    }
-
     [Serializable]
     private class AC_HighScoreListWrapper
     {

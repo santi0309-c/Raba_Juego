@@ -56,7 +56,7 @@ public class AC_HugResolver : MonoBehaviour
         EstaResolviendo = false;
     }
 
-    public void Resolver(AC_PlayerController atacante, AC_PlayerController objetivo, float tiempoIntento)
+    public void Resolver(AC_PlayerController atacante, AC_PlayerController objetivo)
     {
         if (gm == null) return;
         if (!gm.IsRoundActive || atacante == null || objetivo == null) return;

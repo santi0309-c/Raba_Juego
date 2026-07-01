@@ -20,8 +20,6 @@ public class AC_PlayerController : MonoBehaviour
 
     public float moveSpeed = 5.5f;
     public float rotationSpeed = 12f;
-    public bool tankControls = true;
-    public float turnSpeedDegrees = 260f;
     public float gravity = -25f;
     public float fallY = -4f;
 
@@ -44,12 +42,9 @@ public class AC_PlayerController : MonoBehaviour
     public Vector3 blockModelOffset = Vector3.zero;
 
     public bool enableAnimator = true;
-    public bool syncRotationWithCamera = false;
 
     private CharacterController controller;
     private AC_HugDetector hugDetector;
-    private Rigidbody rigidBody;
-    private Collider fallbackCollider;
     private AC_Spawner spawnerHelper;
     private Animator animator;
     private Transform modelTransform;
@@ -64,11 +59,8 @@ public class AC_PlayerController : MonoBehaviour
     private Vector3 impulseVelocity;
     private float impulseTimer;
     private Vector3 lastNonZeroInput = Vector3.forward;
-    private float forwardInput;
-    private float turnInput;
     private float lastRespawnTime = -999f;
     private float respawnProtectionDuration = 0.5f;
-    private Quaternion targetAimRotation;
 
     public bool IsBlocking;
     public bool IsDashing;
@@ -91,8 +83,6 @@ public class AC_PlayerController : MonoBehaviour
     {
         controller = GetComponent<CharacterController>();
         hugDetector = GetComponent<AC_HugDetector>();
-        rigidBody = GetComponent<Rigidbody>();
-        fallbackCollider = GetComponent<CapsuleCollider>();
         spawnerHelper = GetComponent<AC_Spawner>();
         modelTransform = transform.Find("Model");
         animator = GetComponent<Animator>();
@@ -136,18 +126,6 @@ public class AC_PlayerController : MonoBehaviour
         spawnerHelper.autoRespawnOnFall = false;
         spawnerHelper.posicionEjeY = fallY;
 
-        if (rigidBody != null)
-        {
-            rigidBody.isKinematic = true;
-            rigidBody.useGravity = false;
-            rigidBody.detectCollisions = false;
-        }
-
-        if (fallbackCollider != null)
-        {
-            fallbackCollider.enabled = false;
-        }
-
         ConfigureDefaultBindings();
     }
 
@@ -174,7 +152,6 @@ public class AC_PlayerController : MonoBehaviour
             }
         }
 
-        tankControls = false;
         moveRelativeToCamera = true;
     }
 
@@ -184,17 +161,6 @@ public class AC_PlayerController : MonoBehaviour
         {
             spawnerHelper.SetRespawnPoint(point);
         }
-    }
-
-    public void SetAimRotation(Quaternion rotation)
-    {
-        targetAimRotation = rotation;
-        syncRotationWithCamera = true;
-    }
-
-    public void ClearAimRotation()
-    {
-        syncRotationWithCamera = false;
     }
 
     private void Update()
@@ -274,23 +240,6 @@ public class AC_PlayerController : MonoBehaviour
         if (Input.GetKey(downKey)) z -= 1f;
         if (Input.GetKey(upKey)) z += 1f;
 
-        turnInput = x;
-        if (turnInput > 1f) turnInput = 1f;
-        if (turnInput < -1f) turnInput = -1f;
-
-        forwardInput = z;
-        if (forwardInput > 1f) forwardInput = 1f;
-        if (forwardInput < -1f) forwardInput = -1f;
-
-        if (tankControls)
-        {
-            if (Mathf.Abs(forwardInput) > 0.01f)
-            {
-                return transform.forward * forwardInput;
-            }
-            return Vector3.zero;
-        }
-
         Vector3 direction = new Vector3(x, 0f, z);
         if (direction.sqrMagnitude > 1f)
         {
@@ -347,46 +296,15 @@ public class AC_PlayerController : MonoBehaviour
         Vector3 movementInput = input;
         Vector3 horizontal = Vector3.zero;
 
-        if (tankControls)
-        {
-            if (Mathf.Abs(turnInput) > 0.01f && !IsBlocking)
-            {
-                transform.Rotate(Vector3.up, turnInput * turnSpeedDegrees * Time.deltaTime, Space.World);
-            }
-
-            if (Mathf.Abs(forwardInput) > 0.01f)
-            {
-                movementInput = transform.forward * forwardInput;
-            }
-            else
-            {
-                movementInput = Vector3.zero;
-            }
-
-            if (movementInput.sqrMagnitude > 0.01f)
-            {
-                lastNonZeroInput = movementInput.normalized;
-            }
-        }
-
         if (!IsBlocking)
         {
             horizontal = movementInput * moveSpeed;
         }
 
-        if (!tankControls && movementInput.sqrMagnitude > 0.01f && !IsBlocking)
+        if (movementInput.sqrMagnitude > 0.01f && !IsBlocking)
         {
             Quaternion targetRotation = Quaternion.LookRotation(movementInput, Vector3.up);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
-        }
-        else if (syncRotationWithCamera && !IsBlocking)
-        {
-            float maxDegreesDelta = rotationSpeed * 90f * Time.deltaTime;
-            if (maxDegreesDelta < 90f)
-            {
-                maxDegreesDelta = 90f;
-            }
-            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetAimRotation, maxDegreesDelta);
         }
 
         if (dashTimer > 0f)
@@ -656,7 +574,7 @@ public class AC_PlayerController : MonoBehaviour
 
     private bool HasMovementInput()
     {
-        return Mathf.Abs(forwardInput) > 0.01f || Mathf.Abs(turnInput) > 0.01f;
+        return Mathf.Abs(Input.GetAxisRaw("Horizontal")) > 0.01f || Mathf.Abs(Input.GetAxisRaw("Vertical")) > 0.01f;
     }
 
     private bool CanTryHug()

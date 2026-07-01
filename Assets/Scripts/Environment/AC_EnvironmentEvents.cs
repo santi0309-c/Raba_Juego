@@ -39,40 +39,6 @@ public class AC_EnvironmentEvents : MonoBehaviour
     private Color originalFogColor;
     private FogMode originalFogMode;
 
-    public void EnsureArenaVisualAligned()
-    {
-        if (arenaVisual == null) return;
-
-        GameObject centerObject = FindArenaCenterOrCylinder();
-        if (centerObject == null)
-        {
-            return;
-        }
-
-        if (arenaVisual.name == "ArenaCenter")
-        {
-            Transform candidate = centerObject.transform;
-            if (candidate != null && candidate.name == "ArenaCylinder")
-            {
-                Debug.LogWarning("[AC_EnvironmentEvents] arenaVisual apuntaba a ArenaCenter; se remapea a ArenaCylinder.");
-                arenaVisual = candidate;
-            }
-        }
-
-        centerObject = FindArenaCenterOrCylinder();
-        if (centerObject == null) return;
-        Vector3 target = centerObject.transform.position;
-        Vector3 current = arenaVisual.position;
-        arenaVisual.position = new Vector3(target.x, current.y, target.z);
-    }
-
-    private GameObject FindArenaCenterOrCylinder()
-    {
-        GameObject arenaCylinder = GameObject.Find("ArenaCylinder");
-        if (arenaCylinder != null) return arenaCylinder;
-        return GameObject.Find("ArenaCenter");
-    }
-
     public void BeginMatch()
     {
         int min = minRound;
